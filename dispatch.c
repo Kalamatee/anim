@@ -11,26 +11,23 @@
 **
 */
 
-/* Use asyncronous I/O below. Disabled due problems with Seek'ing */
-#if 0
-#define DOASYNCIO 1
-#endif
+#define DEBUG 1
+#include <aros/debug.h>
 
-#if 0
-#define D( x ) x
-#else
-#define D( x )
-#endif
+struct AnimInstData;
+struct FrameNode;
 
 /* main includes */
 #include "classbase.h"
 #include "classdata.h"
+#if defined(DOASYNCIO)
 #include "asyncio.h"
+#endif
 
 /*****************************************************************************/
 
 /* IFF errors to DOS errors */
-static const
+const
 LONG ifferr2doserr[] =
 {
   0L,                         /* End of file (not an error).                  */
@@ -50,35 +47,16 @@ LONG ifferr2doserr[] =
 /*****************************************************************************/
 
 /* local prototypes */
-static                 BOOL                 FreeAbleFrame( struct AnimInstData *, struct FrameNode * );
 static                 STRPTR               GetPrefsVar( struct ClassBase *, STRPTR );
 static                 void                 YouShouldRegister( struct ClassBase *, struct AnimInstData * );
 static                 BOOL                 matchstr( struct ClassBase *, STRPTR, STRPTR );
-static                 void                 ReadENVPrefs( struct ClassBase *, struct AnimInstData * );
-static                 LONG                 LoadFrames( struct ClassBase *, Object * );
 static                 struct FrameNode    *AllocFrameNode( struct ClassBase *, APTR );
-static                 struct FrameNode    *FindFrameNode( struct MinList *, ULONG );
-static                 void                 FreeFrameNodeResources( struct ClassBase *, struct MinList * );
-static                 void                 CopyBitMap( struct ClassBase *, struct BitMap *, struct BitMap * );
 static                 void                 XCopyMem( struct ClassBase *, APTR, APTR, ULONG );
-static                 void                 ClearBitMap( struct BitMap * );
 static                 void                 XORBitMaps( struct BitMap *, struct BitMap * );
-static                 struct BitMap       *AllocBitMapPooled( struct ClassBase *, ULONG, ULONG, ULONG, APTR );
-static                 BOOL                 CMAP2Object( struct ClassBase *, Object *, UBYTE *, ULONG );
-static                 struct ColorMap     *CMAP2ColorMap( struct ClassBase *, struct AnimInstData *, UBYTE *, ULONG );
-static                 struct ColorMap     *CopyColorMap( struct ClassBase *, struct ColorMap * );
-static                 APTR                 AllocVecPooled( struct ClassBase *, APTR, ULONG );
-static                 void                 FreeVecPooled( struct ClassBase *, APTR, APTR );
-static                 LONG                 DrawDLTA( struct ClassBase *, struct AnimInstData *, struct BitMap *, struct BitMap *, struct AnimHeader *, UBYTE *, ULONG );
 static                 void                 DumpAnimHeader( struct ClassBase *, struct AnimInstData *, ULONG, struct AnimHeader * );
 static                 struct FrameNode    *GetPrevFrameNode( struct FrameNode *, ULONG );
-static                 void                 OpenLogfile( struct ClassBase *, struct AnimInstData * );
-static                 void                 mysprintf( struct ClassBase *, STRPTR, STRPTR, ... );
-static                 void                 verbose_printf( struct ClassBase *, struct AnimInstData *, STRPTR, ... );
-static                 void                 error_printf( struct ClassBase *, struct AnimInstData *, STRPTR, ... );
 static                 void                 AttachSample( struct ClassBase *, struct AnimInstData * );
 
-static                 ULONG                SaveIFFAnim( struct ClassBase *, struct IClass *, Object *, struct dtWrite * );
 static                 struct IFFHandle    *CreateDOSIFFHandle( struct ClassBase *, BPTR );
 static                 LONG                 StartIFFAnim3( struct ClassBase *, struct AnimInstData *, struct IFFHandle *iff, struct AnimContext *, struct BitMapHeader *, ULONG, ULONG *, ULONG, ULONG, ULONG, struct BitMap * );
 static                 void                 EndIFFAnim3( struct ClassBase *, struct AnimInstData *, struct IFFHandle * );
@@ -97,10 +75,13 @@ static                 void                 DeleteAnimContext( struct ClassBase 
 
 /*****************************************************************************/
 
+#if !defined (__AROS__)
 /* Create "anim.datatype" BOOPSI class */
 struct IClass *initClass( struct ClassBase *cb )
 {
     struct IClass *cl;
+
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
 
     /* Create our class... */
     if( cl = MakeClass( ANIMDTCLASS, ANIMATIONDTCLASS, NULL, (ULONG)sizeof( struct AnimInstData ), 0UL ) )
@@ -109,7 +90,7 @@ struct IClass *initClass( struct ClassBase *cb )
       cl -> cl_Dispatcher . h_Entry    = (HOOKFUNC)StackSwapDispatch; /* see stackswap.c */
       cl -> cl_Dispatcher . h_SubEntry = (HOOKFUNC)Dispatch;          /* see stackswap.c */
       cl -> cl_Dispatcher . h_Data     = (APTR)DTSTACKSIZE;           /* see stackswap.c */
-      cl -> cl_UserData                = (ULONG)cb;                   /* class library base as expected by datatypes.library */
+      cl -> cl_UserData                = (IPTR)cb;                   /* class library base as expected by datatypes.library */
 
       AddClass( cl );
     }
@@ -117,862 +98,74 @@ struct IClass *initClass( struct ClassBase *cb )
     return( cl );
 }
 
+#include "methods.h"
+
 /*****************************************************************************/
 
 /* class dispatcher */
 DISPATCHERFLAGS
-ULONG Dispatch( REGA0 struct IClass *cl, REGA2 Object *o, REGA1 Msg msg )
+IPTR Dispatch( REGA0 struct IClass *cl, REGA2 Object *o, REGA1 Msg msg )
 {
     struct ClassBase     *cb = (struct ClassBase *)(cl -> cl_UserData);
     struct AnimInstData  *aid;
-    ULONG                 retval = 0UL;
+    IPTR                 retval = 0UL;
+
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
 
     switch( msg -> MethodID )
     {
-/****** anim.datatype/OM_NEW *************************************************
-*
-*    NAME
-*        OM_NEW -- Create a anim.datatype object.
-*
-*    FUNCTION
-*        The OM_NEW method is used to create an instance of the anim.datatype
-*        class.  This method is passed to the superclass first. After this,
-*        anim.datatype parses the prefs file and makes a scan through
-*        the data to get index information. Frame bitmaps are loaded if the
-*        input stream isn't seekable (e.g. IFF handle/clipboard),
-*        colormaps and the first frame are loaded immediately.
-*        If a sample was set in the prefs, it will be loaded and attached
-*        to the animation.
-*
-*    ATTRIBUTES
-*        The following attributes can be specified at creation time.
-*
-*        DTA_SourceType (ULONG) -- Determinates the type of DTA_Handle
-*            attribute. DTST_FILE, DTST_CLIPBOARD and DTST_RAM are supported.
-*            If any other type was set in a given DTA_SourceType,
-*            OM_NEW will be rejected.
-*            A sourcetype of DTST_CLIPBOARD forces the LOADALL prefs
-*            switch (can't seek on clipboard).
-*            Defaults to DTST_FILE.
-*
-*        DTA_Handle -- For both DTST_FILE and DTST_CLIPBOARD, a
-*            (struct IFFHandle *) is expected. This handle will be
-*            created by datatypesclass depeding on the DTF_#? flag, which
-*            is DTF_IFF here.  DTST_FILE, datatypesclass creates
-*            a IFF handle from the given DTA_Name and DTA_Handle (a
-*            BPTR returned by Lock), if DTST_CLIPBOARD, datatypesclass
-*            passes the given (IFF) handle through.
-*            A DTST_RAM (create empty object) source type requires a NULL
-*            handle.
-*
-*    RESULT
-*        If the object was created a pointer to the object is returned,
-*        otherwise NULL is returned.
-*
-******************************************************************************
-*
-*/
+
       case OM_NEW:
-      {
-          struct TagItem *ti;
-
-          /* We only support DTST_FILE, DTST_CLIPBOARD or DTST_RAM as source type */
-          if( ti = FindTagItem( DTA_SourceType, (((struct opSet *)msg) -> ops_AttrList) ) )
-          {
-            if( ((ti -> ti_Data) != DTST_FILE)      &&
-                ((ti -> ti_Data) != DTST_CLIPBOARD) &&
-                ((ti -> ti_Data) != DTST_RAM) )
-            {
-              SetIoErr( ERROR_OBJECT_WRONG_TYPE );
-
-              break;
-            }
-          }
-
-          /* Create object */
-          if( retval = DoSuperMethodA( cl, o, msg ) )
-          {
-            LONG error;
-
-            /* Load frames... */
-            if( error = LoadFrames( cb, (Object *)retval ) )
-            {
-              /* Something went fatally wrong, dispose object */
-              CoerceMethod( cl, (Object *)retval, OM_DISPOSE );
-              retval = 0UL;
-            }
-
-            SetIoErr( error );
-          }
-      }
+          retval = DT_NewMethod( cl, o, msg );
           break;
 
-/****** anim.datatype/OM_DISPOSE *********************************************
-*
-*    NAME
-*        OM_DISPOSE -- Delete a anim.datatype object.
-*
-*    FUNCTION
-*        The OM_DISPOSE method is used to delete an instance of the
-*        anim.datatype class. This method is passed to the superclass when
-*        it has completed.
-*        This method frees all frame nodes and their contents (bitmaps,
-*        colormaps, samples etc.)
-*
-*    RESULT
-*        The object is deleted. 0UL is returned.
-*
-******************************************************************************
-*
-*/
       case OM_DISPOSE:
-      {
-          LONG saved_ioerr = IoErr();
-
-          /* Get a pointer to our object data */
-          aid = (struct AnimInstData *)INST_DATA( cl, o );
-
-          /* Wait for any outstanding blitter usage (which may use one of our bitmaps) */
-          WaitBlit();
-
-          /* Free colormaps etc. */
-          FreeFrameNodeResources( cb, (&(aid -> aid_FrameList)) );
-
-          /* Free our key bitmap */
-          FreeBitMap( (aid -> aid_KeyBitMap) );
-
-          /* Delete the pools */
-          DeletePool( (aid -> aid_FramePool) );
-          DeletePool( (aid -> aid_Pool) );
-
-          /* Close input file */
-          if( aid -> aid_FH )
-          {
-#ifdef DOASYNCIO
-            CloseAsync( cb, (aid -> aid_FH) );
-#else
-            Close( (aid -> aid_FH) );
-#endif /* DOASYNCIO */
-          }
-
-          /* Close verbose output file */
-          if( aid -> aid_VerboseOutput )
-          {
-            Close( (aid -> aid_VerboseOutput) );
-          }
-
-          /* Dispose object */
-          DoSuperMethodA( cl, o, msg );
-          
-          SetIoErr( saved_ioerr );
-      }
+          retval = DT_DisposeMethod( cl, o, msg );
           break;
 
       case OM_UPDATE:
-      {
-          if( DoMethod( o, ICM_CHECKLOOP ) )
-          {
-            break;
-          }
-      }
       case OM_SET:
-      {
-          /* Pass the attributes to the animation class and force a refresh if we need it */
-          if( retval = DoSuperMethodA( cl, o, msg ) )
-          {
-            /* Top instance ? */
-            if( OCLASS( o ) == cl )
-            {
-              struct RastPort *rp;
-
-              /* Get a pointer to the rastport */
-              if( rp = ObtainGIRPort( (((struct opSet *)msg) -> ops_GInfo) ) )
-              {
-                struct gpRender gpr;
-
-                /* Force a redraw */
-                gpr . MethodID   = GM_RENDER;
-                gpr . gpr_GInfo  = ((struct opSet *)msg) -> ops_GInfo;
-                gpr . gpr_RPort  = rp;
-                gpr . gpr_Redraw = GREDRAW_UPDATE;
-
-                DoMethodA( o, (Msg)(&gpr) );
-
-                /* Release the temporary rastport */
-                ReleaseGIRPort( rp );
-
-                /* We did a refresh... */
-                retval = 0UL;
-              }
-            }
-          }
-      }
+          retval = DT_SetMethod( cl, o, msg );
           break;
 
-/****** anim.datatype/DTM_WRITE **********************************************
-*
-*    NAME
-*        DTM_WRITE -- Save data
-*
-*    FUNCTION
-*        This method saves the object's contents to disk.
-*
-*        If dtw_Mode is DTWM_IFF, the method is passed unchanged to the
-*        superclass, animation.datatype, which writes a single IFF ILBM
-*        picture.
-*
-*        If dtw_mode is DTWM_RAW, the object saved an IFF ANIM stream to
-*        the filehandle given, starting with the current frame until
-*        the end is reached.
-*        The sequence saved can be controlled by the ADTA_Frame, ADTA_Frames
-*        and ADTA_FrameIncrement attributes (see TAGS section below).
-*
-*    TAGS
-*        When writing the local ("raw") format, IFF ANIM, the following
-*        attributes are recognized:
-*
-*        ADTA_Frame (ULONG) - start frame, saving starts here.
-*            Defaults to the current frame displayed.
-*
-*        ADTA_Frames (ULONG) - the number of frames to be saved,
-*            Defaults to (max_num_of_frames - curr_frame).
-*
-*        ADTA_FrameIncrement (ULONG) - frame increment when saving.
-*            Defaults to 1, which means: "jump to next frame".
-*
-*    NOTE
-*        - Any sound attached to the animation will NOT be saved.
-*
-*        - A CTRL-D signal to the writing process aborts the save.
-*
-*    RESULT
-*        Returns 0 for failure (IoErr() returns result2), non-zero
-*        for success.
-*
-******************************************************************************
-*
-*/
       case DTM_WRITE:
-      {
-          struct dtWrite *dtw;
-
-          dtw = (struct dtWrite *)msg;
-
-          /* Local data format not supported yet... */
-          if( (dtw -> dtw_Mode) == DTWM_RAW )
-          {
-            retval = SaveIFFAnim( cb, cl, o, dtw );
-          }
-          else
-          {
-            /* Pass msg to superclass (which writes a single frame as an IFF ILBM picture)... */
-            retval = DoSuperMethodA( cl, o, msg );
-          }
-      }
+          retval = DT_WriteMethod( cl, o, msg );
           break;
-
-/****** anim.datatype/ADTM_START *********************************************
-*
-*    NAME
-*        ADTM_START -- Prepare for playback
-*
-*    FUNCTION
-*        ADTM_START tells the subclass (us) to prepare for continous
-*        playback. To avoid a long "search" for a full frame during the
-*        playback clock is running, we load here the given timestamp
-*        (asa_Frame) manually (and preseves it using a small trick, see
-*        source).
-*
-*        After all, the method is passed to superclass, which starts the
-*        playback (and the master clock).
-*
-*    RESULT
-*        Returns result from superclass (animation.datatype)
-*
-*    NOTE
-*
-******************************************************************************
-*
-*/
 
       case ADTM_START:
-      {
-          struct FrameNode *fn;
-          struct adtStart  *asa;
-          ULONG             timestamp;
-
-          aid       = (struct AnimInstData *)INST_DATA( cl, o );
-          asa       = (struct adtStart *)msg;
-          timestamp = asa -> asa_Frame;
-
-          ObtainSemaphore( (&(aid -> aid_SigSem)) );
-
-          /* Turn on async IO */
-          aid -> aid_AsyncIO = TRUE;
-
-          /* Find frame by timestamp */
-          if( fn = FindFrameNode( (&(aid -> aid_FrameList)), timestamp ) )
-          {
-            /* Load bitmaps only if we don't cache the whole anim and
-             * if we have a filehandle to load from (an empty object created using DTST_RAM don't have this)...
-             */
-            if( ((aid -> aid_LoadAll) == FALSE) && (aid -> aid_FH) )
-            {
-              /* If no bitmap is loaded, load it... */
-              if( (fn -> fn_BitMap) == NULL )
-              {
-                struct adtFrame alf;
-
-                /* reset method msg */
-                memset( (void *)(&alf), 0, sizeof( struct adtFrame ) );
-
-                /* load frame */
-                alf . MethodID      = ADTM_LOADFRAME;
-                alf . alf_TimeStamp = timestamp;
-                alf . alf_Frame     = timestamp;
-
-                /* Load frame */
-                if( DoMethodA( o, (Msg)(&alf) ) )
-                {
-                  /* Success ! */
-
-                  /* The "trick" used here is to decrase the fn_UseCount
-                   * WITHOUT unloading the bitmap. The first following
-                   * ADTM_LOADFRAME triggered by animation.datatypes playback
-                   * clock gets this frame without any problems
-                   */
-                  fn -> fn_UseCount--;
-                }
-                else
-                {
-                  /* Failure ! */
-                  error_printf( cb, aid, "ADTM_START load error %ld", IoErr() );
-
-                  /* Unload frame... */
-                  alf . MethodID = ADTM_UNLOADFRAME;
-                  DoMethodA( o, (Msg)(&alf) );
-                }
-              }
-            }
-          }
-
-          ReleaseSemaphore( (&(aid -> aid_SigSem)) );
-
-          retval = DoSuperMethodA( cl, o, msg );
-      }
+          retval = DT_Start( cl, o, msg );
           break;
-
-/****** anim.datatype/ADTM_PAUSE **********************************************
-*
-*    NAME
-*        ADTM_PAUSE -- Pause playback
-*
-*    FUNCTION
-*        ADTM_PAUSE tells the subclass (use) to pause playback.
-*
-*        The method is passed to animation.datatype first, which pauses the
-*        playback clock.
-*
-*    RESULT
-*        Returns result from superclass (animation.datatype)
-*
-*    NOTE
-*
-******************************************************************************
-*
-*/
 
       case ADTM_PAUSE:
-      {
-          aid = (struct AnimInstData *)INST_DATA( cl, o );
-
-          /* Pass msg to superclass first ! */
-          retval = DoSuperMethodA( cl, o, msg );
-
-          ObtainSemaphore( (&(aid -> aid_SigSem)) );
-
-            /* Return to syncrounous IO */
-            aid -> aid_AsyncIO = FALSE;
-
-          ReleaseSemaphore( (&(aid -> aid_SigSem)) );
-      }
+          retval = DT_Pause( cl, o, msg );
           break;
-
-/****** anim.datatype/ADTM_STOP **********************************************
-*
-*    NAME
-*        ADTM_STOP -- Stop playback
-*
-*    FUNCTION
-*        ADTM_STOP tells the subclass (use) to stop playback.
-*
-*        The method is passed to animation.datatype first, which stops the
-*        playback clock.
-*
-*        After clock has been stopped, we search for frames which have a
-*        0 UseCount and have not been unloaded yet (a small cleaup to get
-*        rid of frames which are loaded using the "trick" in ADTM_START
-*        code).
-*
-*    RESULT
-*        Returns result from superclass (animation.datatype)
-*
-*    NOTE
-*
-******************************************************************************
-*
-*/
-
 
       case ADTM_STOP:
-      {
-          aid = (struct AnimInstData *)INST_DATA( cl, o );
-
-          /* Pass msg to superclass first ! */
-          retval = DoSuperMethodA( cl, o, msg );
-
-          ObtainSemaphore( (&(aid -> aid_SigSem)) );
-
-#if 0
-          if( ((aid -> aid_LoadAll) == FALSE) && (aid -> aid_FH) )
-          {
-            struct FrameNode *worknode,
-                             *nextnode;
-
-            worknode = (struct FrameNode *)(aid -> aid_FrameList . mlh_Head);
-
-            while( nextnode = (struct FrameNode *)(worknode -> fn_Node . mln_Succ) )
-            {
-              /* Free an existing bitmap if it isn't in use and if it is NOT the first bitmap */
-              if( ((worknode -> fn_UseCount) == 0) && (worknode -> fn_BitMap) && (worknode != (struct FrameNode *)(aid -> aid_FrameList . mlh_Head)) )
-              {
-                /* Don't free the current nor the previous nor the next bitmap (to avoid problems with delta frames) */
-                if( (worknode != (aid -> aid_CurrFN)) &&
-                    (worknode != (struct FrameNode *)(aid -> aid_CurrFN -> fn_Node . mln_Succ)) &&
-                    (worknode != (struct FrameNode *)(aid -> aid_CurrFN -> fn_Node . mln_Pred)) )
-                {
-                  FreeVecPooled( cb, (aid -> aid_FramePool), (worknode -> fn_BitMap) );
-                  worknode -> fn_BitMap = NULL;
-                }
-              }
-
-              worknode = nextnode;
-            }
-          }
-#endif
-
-          /* Return to syncrounous IO */
-          aid -> aid_AsyncIO = FALSE;
-
-          ReleaseSemaphore( (&(aid -> aid_SigSem)) );
-      }
+          retval = DT_Stop( cl, o, msg );
           break;
 
-
-/****** anim.datatype/ADTM_LOADFRAME *****************************************
-*
-*    NAME
-*        ADTM_LOADFRAME -- Load frame
-*
-*    FUNCTION
-*        The ADTM_LOADFRAME method is used to obtain the bitmap and timing
-*        data of the animation.
-*        The given timestamp will be used to find a matching timestamp
-*        in the internal FrameNode list. If it was found, the corresponding
-*        timing, bitmap and colormap data are stored into the struct
-*        adtFrame. If the bitmap wasn't loaded at this time, this method 
-*        attempts to load it from disk.
-*
-*    RESULT
-*        Returns the bitmap ptr if a bitmap was found, 0UL otherwise;
-*        in case of failure Result2 contains the cause:
-*        ERROR_OBJECT_NOT_FOUND: Given timestamp does not exist
-*        ERROR_NO_FREE_STORE:    No memory
-*        and so on...
-*
-*    NOTE
-*        It is expected that a 0 return code (error) causes an
-*        ADTM_UNLOADFRAME that the invalid bitmap etc. will be freed.
-*
-******************************************************************************
-*
-*/
       case ADTM_LOADFRAME:
-      {
-          struct FrameNode *fn;
-          struct adtFrame  *alf;
-
-          aid = (struct AnimInstData *)INST_DATA( cl, o );
-          alf = (struct adtFrame *)msg;
-
-          ObtainSemaphore( (&(aid -> aid_SigSem)) );
-
-          /* Like "realloc": Free any given frame here */
-          if( alf -> alf_UserData )
-          {
-            msg -> MethodID = ADTM_UNLOADFRAME;
-
-              DoMethodA( o, msg );
-
-            msg -> MethodID = ADTM_LOADFRAME;
-          }
-
-          /* Find frame by timestamp */
-          if( fn = FindFrameNode( (&(aid -> aid_FrameList)), (alf -> alf_TimeStamp) ) )
-          {
-            LONG error = 0L;
-
-            aid -> aid_CurrFN = fn;
-
-            /* Load bitmaps only if we don't cache the whole anim and
-             * if we have a filehandle to load from (an empty object created using DTST_RAM don't have this)...
-             */
-            if( ((aid -> aid_LoadAll) == FALSE) && (aid -> aid_FH) )
-            {
-              /* If no bitmap is loaded, load it... */
-              if( (fn -> fn_BitMap) == NULL )
-              {
-                if( fn -> fn_BitMap = AllocBitMapPooled( cb, (ULONG)(aid -> aid_BMH -> bmh_Width), (ULONG)(aid -> aid_BMH -> bmh_Height), (ULONG)(aid -> aid_BMH -> bmh_Depth), (aid -> aid_FramePool) ) )
-                {
-                  struct FrameNode *worknode = fn;
-                  ULONG             rollback = 0UL;
-                  UBYTE            *buff;
-                  ULONG             buffsize;
-
-                  /* Buffer to fill. Below we try to read some more bytes
-                   * (the size value is stored in worknode -> fn_LoadSize)
-                   * (ANHD chunk (~68 bytes), maybe a CMAP) to save
-                   * the Seek in the next cycle.
-                   * This makes only much sense when doing async io (during playback)...
-                   */
-
-                  /* Not the last frame !
-                   * Note that this code is replicated in the loop below !!
-                   */
-
-                  worknode -> fn_LoadSize = worknode -> fn_BMSize;
-
-                  if( (worknode -> fn_Node . mln_Succ -> mln_Succ) && (aid -> aid_AsyncIO) )
-                  {
-                    ULONG nextpos = ((((struct FrameNode *)(worknode -> fn_Node . mln_Succ)) -> fn_BMOffset) + 8UL);
-
-                    worknode -> fn_LoadSize = MAX( (worknode -> fn_LoadSize), (nextpos - ((worknode -> fn_BMOffset) + 8UL)) );
-
-                    /* Don't alloc a too large buffer... */
-                    worknode -> fn_LoadSize = MIN( (worknode -> fn_LoadSize), ((worknode -> fn_BMSize) * 2UL) );
-                  }
-
-                  buffsize = worknode -> fn_LoadSize;
-
-                  do
-                  {
-                    worknode = worknode -> fn_PrevFrame;
-                    rollback++;
-
-                    worknode -> fn_LoadSize = worknode -> fn_BMSize;
-
-                    if( (worknode -> fn_Node . mln_Succ -> mln_Succ) && (aid -> aid_AsyncIO) )
-                    {
-                      ULONG nextpos = ((((struct FrameNode *)(worknode -> fn_Node . mln_Succ)) -> fn_BMOffset) + 8UL);
-
-                      worknode -> fn_LoadSize = MAX( (worknode -> fn_LoadSize), (nextpos - ((worknode -> fn_BMOffset) + 8UL)) );
-
-                      /* Don't alloc a too large buffer... */
-                      worknode -> fn_LoadSize = MIN( (worknode -> fn_LoadSize), ((worknode -> fn_BMSize) * 2UL) );
-                    }
-
-                    buffsize = MAX( buffsize, (worknode -> fn_LoadSize) );
-                  } while( ((worknode -> fn_BitMap) == NULL) && ((worknode -> fn_TimeStamp) != 0UL) );
-
-                  if( ((worknode -> fn_BitMap) == NULL) && ((worknode -> fn_TimeStamp) == 0UL) )
-                  {
-                    verbose_printf( cb, aid, "first frame without bitmap ... !\n" );
-                    ClearBitMap( (fn -> fn_BitMap) );
-                  }
-
-                  /* Alloc buffer for compressed frame (DLTA) data */
-                  if( buff = (UBYTE *)AllocVecPooled( cb, (aid -> aid_Pool), (buffsize + 32UL) ) )
-                  {
-                    do
-                    {
-                      ULONG current = rollback;
-
-                      worknode = fn;
-
-                      while( current-- )
-                      {
-                        worknode = worknode -> fn_PrevFrame;
-                      }
-
-                      if( (worknode -> fn_BitMap) && (worknode != fn) )
-                      {
-                        CopyBitMap( cb, (worknode -> fn_BitMap), (fn -> fn_BitMap) );
-                      }
-                      else
-                      {
-                        LONG seekdist; /* seeking distance (later Seek result, if Seek'ed) */
-
-                        seekdist = (((worknode -> fn_BMOffset) + 8UL) - (aid -> aid_CurrFilePos));
-
-                        /* Seek needed ? */
-                        if( seekdist != 0L )
-                        {
-#ifdef DOASYNCIO
-                          seekdist = SeekAsync( cb, (aid -> aid_FH), seekdist, OFFSET_CURRENT );
-#else
-                          seekdist = Seek( (aid -> aid_FH), seekdist, OFFSET_CURRENT );
-#endif /* DOASYNCIO */
-                        }
-
-                        /* "Seek" success ? */
-                        if( seekdist != (-1L) )
-                        {
-                          LONG bytesread;
-
-#ifdef DOASYNCIO
-                          bytesread = ReadAsync( cb, (aid -> aid_FH), buff, (worknode -> fn_LoadSize) );
-#else
-                          bytesread = Read( (aid -> aid_FH), buff, (worknode -> fn_LoadSize) );
-#endif /* DOASYNCIO */
-
-                          /* No error during reading ? */
-                          if( (bytesread >= (worknode -> fn_BMSize)) && (bytesread != -1L) )
-                          {
-                            LONG ifferror;
-
-                            if( ifferror = DrawDLTA( cb, aid, (fn -> fn_BitMap), (fn -> fn_BitMap), (&(worknode -> fn_AH)), buff, (worknode -> fn_BMSize) ) )
-                            {
-                              error_printf( cb, aid, "dlta unpacking error %lu\n", ifferror );
-
-                              /* convert IFFParse error to DOS error */
-                              error = ifferr2doserr[ (-ifferror - 1) ];
-                            }
-
-                            /* Bump file pos */
-                            aid -> aid_CurrFilePos = ((worknode -> fn_BMOffset) + 8UL) + bytesread;
-                          }
-                          else
-                          {
-                            /* Read error */
-                            error = IoErr();
-
-                            /* Error, rewind stream */
-#ifdef DOASYNCIO
-                            SeekAsync( cb, (aid -> aid_FH), 0L, OFFSET_BEGINNING );
-#else
-                            Seek( (aid -> aid_FH), 0L, OFFSET_BEGINNING );
-#endif /* DOASYNCIO */
-                            aid -> aid_CurrFilePos = 0L;
-                          }
-
-                          worknode -> fn_LoadSize = 0UL; /* destroy that this value won't affect anything else */
-                        }
-                        else
-                        {
-                          /* Seek error */
-                          error = IoErr();
-                        }
-                      }
-                    } while( rollback-- && (error == 0L) );
-
-                    FreeVecPooled( cb, (aid -> aid_Pool), buff );
-                  }
-                  else
-                  {
-                    /* No memory for compressed frame data */
-                    error = ERROR_NO_FREE_STORE;
-                  }
-                }
-                else
-                {
-                  /* No memory for frame bitmap */
-                  error = ERROR_NO_FREE_STORE;
-                }
-              }
-            }
-
-            /* Store frame/context information */
-            alf -> alf_Frame    = fn -> fn_Frame;
-            alf -> alf_Duration = fn -> fn_Duration;
-            alf -> alf_UserData = (APTR)fn;        /* Links back to this FrameNode (used by ADTM_UNLOADFRAME) */
-
-            /* Store bitmap information */
-            alf -> alf_BitMap = fn -> fn_BitMap;
-            alf -> alf_CMap   = fn -> fn_CMap;
-
-            /* Is there a sample to play ? */
-            if( fn -> fn_Sample )
-            {
-              /* Store sound information */
-              alf -> alf_Sample       = fn -> fn_Sample;
-              alf -> alf_SampleLength = fn -> fn_SampleLength;
-              alf -> alf_Period       = fn -> fn_Period;
-            }
-            else
-            {
-              /* No sound */
-              alf -> alf_Sample       = NULL;
-              alf -> alf_SampleLength = 0UL;
-              alf -> alf_Period       = 0UL;
-            }
-
-            /* Frame "in use", even for a unsuccessful result; on error
-             * animation.datatype send an ADTM_UNLOADFRAME which frees
-             * allocated resources and decreases the "UseCount"...
-             */
-            fn -> fn_UseCount++;
-
-            /* Is this node in the posted-free queue ? */
-            if( fn -> fn_PostedFree )
-            {
-              Remove( (struct Node *)(&(fn -> fn_PostedFreeNode)) );
-              fn -> fn_PostedFree = FALSE;
-            }
-
-            retval = ((error)?(0UL):(ULONG)(alf -> alf_BitMap)); /* Result  */
-            SetIoErr( error );                                   /* Result2 */
-          }
-          else
-          {
-            /* no matching frame found */
-            SetIoErr( ERROR_OBJECT_NOT_FOUND );
-          }
-
-          ReleaseSemaphore( (&(aid -> aid_SigSem)) );
-      }
+          retval = DT_LoadFrameMethod( cl, o, msg );
           break;
 
-/****** anim.datatype/ADTM_UNLOADFRAME ***************************************
-*
-*    NAME
-*        ADTM_UNLOADFRAME -- Load frame contents
-*
-*    FUNCTION
-*        The ADTM_UNLOADFRAME method is used to release the contents of a
-*        animation frame.
-*
-*        This method frees the bitmap data found in adtFrame.
-*
-*    RESULT
-*        Returns always 0UL.
-*
-******************************************************************************
-*
-*/
       case ADTM_UNLOADFRAME:
-      {
-          struct FrameNode *fn;
-          struct adtFrame  *alf;
-
-          aid = (struct AnimInstData *)INST_DATA( cl, o );
-          alf = (struct adtFrame *)msg;
-
-          /* Free bitmaps only if we don't cache the whole anim */
-          if( (aid -> aid_LoadAll) == FALSE )
-          {
-            struct MinNode *pfn;
-            UWORD           i   = 10;
-
-            ObtainSemaphore( (&(aid -> aid_SigSem)) );
-
-            if( fn = (struct FrameNode *)(alf -> alf_UserData) )
-            {
-              if( (fn -> fn_UseCount) > 0 )
-              {
-                fn -> fn_UseCount--;
-
-                /* Free an existing bitmap if it isn't in use and if it is NOT the first bitmap */
-                if( ((fn -> fn_UseCount) == 0) && (fn -> fn_BitMap) && (fn != (struct FrameNode *)(aid -> aid_FrameList . mlh_Head)) )
-                {
-                  if( FALSE /*FreeAbleFrame( aid, fn )*/ )
-                  {
-                    /* Is this node in the posted-free queue ? */
-                    if( fn -> fn_PostedFree )
-                    {
-                      Remove( (struct Node *)(&(fn -> fn_PostedFreeNode)) );
-                      fn -> fn_PostedFree = FALSE;
-
-                      D( kprintf( "free posted 1 %lu\n", (fn -> fn_TimeStamp) ) );
-                    }
-
-                    FreeVecPooled( cb, (aid -> aid_FramePool), (fn -> fn_BitMap) );
-                    fn -> fn_BitMap = NULL;
-                  }
-                  else
-                  {
-                    if( (fn -> fn_PostedFree) == FALSE )
-                    {
-                      D( kprintf( "posted free %lu\n", (fn -> fn_TimeStamp) ) );
-
-                      AddTail( (struct List *)(&(aid -> aid_PostedFreeList)), (struct Node *)(&(fn -> fn_PostedFreeNode)) );
-                      fn -> fn_PostedFree = TRUE;
-                    }
-                  }
-                }
-              }
-            }
-
-            while( pfn = (struct MinNode *)RemHead( (struct List *)(&(aid -> aid_PostedFreeList)) ) )
-            {
-              fn = POSTEDFREENODE2FN( pfn );
-              fn -> fn_PostedFree = FALSE;
-
-              if( (fn -> fn_UseCount) == 0 )
-              {
-                if( FreeAbleFrame( aid, fn ) )
-                {
-                  D( kprintf( "free posted 2 %lu at %lu\n", (fn -> fn_TimeStamp), (((struct FrameNode *)(alf -> alf_UserData)) -> fn_TimeStamp) ) );
-
-                  FreeVecPooled( cb, (aid -> aid_FramePool), (fn -> fn_BitMap) );
-                  fn -> fn_BitMap = NULL;
-                }
-                else
-                {
-                  AddTail( (struct List *)(&(aid -> aid_PostedFreeList)), (struct Node *)(&(fn -> fn_PostedFreeNode)) );
-                  fn -> fn_PostedFree = TRUE;
-                }
-
-                /* Don't process the list twice */
-                if( fn == ((struct FrameNode *)(alf -> alf_UserData)) )
-                {
-                  i = MIN( 1, i );
-
-                  break;
-                }
-
-                if( i-- == 0 )
-                {
-                  D( kprintf( "pl overflow at %lu\n", (((struct FrameNode *)(alf -> alf_UserData)) -> fn_TimeStamp) ) );
-
-                  break;
-                }
-              }
-            }
-
-            ReleaseSemaphore( (&(aid -> aid_SigSem)) );
-          }
-
-          /* Indicate that the frame has been free'ed. */
-          alf -> alf_UserData = NULL;
-      }
+          retval = DT_UnLoadFrameMethod( cl, o, msg );
           break;
 
-      /* Let the superclass handle everything else */
       default:
-      {
           retval = DoSuperMethodA( cl, o, msg );
-      }
           break;
     }
 
     return( retval );
 }
+#endif
 
-
-static
 BOOL FreeAbleFrame( struct AnimInstData *aid, struct FrameNode *fn )
 {
     struct FrameNode *currfn = aid -> aid_CurrFN;
+
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
 
     /* Don't free the current nor the previous nor the next bitmap (to avoid problems with delta frames) */
     if( (fn == currfn) ||
@@ -1115,7 +308,7 @@ STRPTR GetPrefsVar( struct ClassBase *cb, STRPTR name )
           STRPTR buff;
     const ULONG  buffsize = 16UL;
 
-    if( buff = (STRPTR)AllocVec( (buffsize + 2UL), (MEMF_PUBLIC | MEMF_CLEAR) ) )
+    if ((buff = (STRPTR)AllocVec( (buffsize + 2UL), (MEMF_PUBLIC | MEMF_CLEAR) ) ) != NULL)
     {
       if( GetVar( name, buff, buffsize, GVF_BINARY_VAR ) != (-1L) )
       {
@@ -1127,7 +320,7 @@ STRPTR GetPrefsVar( struct ClassBase *cb, STRPTR name )
         {
           FreeVec( buff );
 
-          if( buff = (STRPTR)AllocVec( (varsize + 2UL), (MEMF_PUBLIC | MEMF_CLEAR) ) )
+          if ((buff = (STRPTR)AllocVec( (varsize + 2UL), (MEMF_PUBLIC | MEMF_CLEAR) ) ) != NULL)
           {
             if( GetVar( name, buff, varsize, GVF_BINARY_VAR ) != (-1L) )
             {
@@ -1168,7 +361,6 @@ BOOL matchstr( struct ClassBase *cb, STRPTR pat, STRPTR s )
 }
 
 
-static
 void ReadENVPrefs( struct ClassBase *cb, struct AnimInstData *aid )
 {
     struct RDArgs envvarrda =
@@ -1205,6 +397,8 @@ void ReadENVPrefs( struct ClassBase *cb, struct AnimInstData *aid )
 
     TEXT   varbuff[ 258 ];
     STRPTR var;
+
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
 
     if( var = GetPrefsVar( cb, "Classes/DataTypes/anim.prefs" ) )
     {
@@ -1246,7 +440,7 @@ void ReadENVPrefs( struct ClassBase *cb, struct AnimInstData *aid )
                         "VOLUME/K/N,"
                         "LOADALL/S,"
                         "NOLOADALL/S,"
-                        "REGISTERED/S", (LONG *)(&animargs), (&envvarrda) ) )
+                        "REGISTERED/S", (IPTR *)(&animargs), (&envvarrda) ) )
           {
             BOOL noignore = TRUE;
 
@@ -1420,11 +614,13 @@ void ReadENVPrefs( struct ClassBase *cb, struct AnimInstData *aid )
       FreeVec( var );
     }
 
+#if (0)
     /* Notify the user that she/he is using shareware... */
     if( !(aid -> aid_Registered) )
     {
       YouShouldRegister( cb, aid );
     }
+#endif
 }
 
 
@@ -1444,6 +640,8 @@ void YouShouldRegister( struct ClassBase *cb, struct AnimInstData *aid )
                       cbuffer[ 256 ];
 #define NUMCHOICES (6)
     ULONG             choices[ NUMCHOICES ];
+
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
 
     /* Create random values */
     CurrentTime( (&xb), (&xa) );
@@ -1507,11 +705,12 @@ void YouShouldRegister( struct ClassBase *cb, struct AnimInstData *aid )
 }
 
 
-static
 LONG LoadFrames( struct ClassBase *cb, Object *o )
 {
     struct AnimInstData *aid   = (struct AnimInstData *)INST_DATA( (cb -> cb_Lib . cl_Class), o );
     LONG                 error = 0L;
+
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
 
     /* Init */
     InitSemaphore( (&(aid -> aid_SigSem)) );
@@ -1522,7 +721,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
     if( aid -> aid_Pool = CreatePool( MEMF_PUBLIC, 16384UL, 16384UL ) )
     {
       APTR                 fh;                              /* handle (IFF stream handle)      */
-      ULONG                sourcetype;                      /* type of stream (either DTST_FILE or DTST_CLIPBOARD */
+      IPTR                sourcetype;                      /* type of stream (either DTST_FILE or DTST_CLIPBOARD */
       ULONG                pos        = 0UL;                /* current file pos in IFF stream  */
       struct BitMapHeader *bmh;                             /* obj's bitmapheader              */
       ULONG                modeid     = (ULONG)INVALID_ID;  /* anim view mode                  */
@@ -1534,9 +733,15 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                            maxreltime = 0UL;                /* Minimum ah_RelTime              */
       struct tPoint       *grabpoint  = NULL;               /* Grabbing point of animation     */
 
+        D(bug("[anim.datatype] %s: pool @ 0x%p\n", __PRETTY_FUNCTION__, aid -> aid_Pool));
+
       /* Prefs defaults */
       aid -> aid_Volume          = 64UL;
+#if !defined(__AROS__)
       aid -> aid_NoDynamicTiming = MAKEBOOL( ((cb -> cb_SuperClassBase -> lib_Version) < 41U) );
+#else
+    aid -> aid_NoDynamicTiming = FALSE;
+#endif
       aid -> aid_ModeID          = (ULONG)INVALID_ID;
 
       /* Read prefs */
@@ -1552,12 +757,19 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
       {
         struct IFFHandle *iff = NULL;
 
+        D(bug("[anim.datatype] %s: handle @ 0x%p\n", __PRETTY_FUNCTION__, fh));
+        D(bug("[anim.datatype] %s: name @ 0x%p '%s'\n", __PRETTY_FUNCTION__, aid -> aid_ProjectName, aid -> aid_ProjectName));
+        D(bug("[anim.datatype] %s: bmh @ 0x%p\n", __PRETTY_FUNCTION__, bmh));
+        D(bug("[anim.datatype] %s: grab @ 0x%p\n", __PRETTY_FUNCTION__, grabpoint));
+
         aid -> aid_BMH = bmh; /* Store BitMapHeader */
 
         switch( sourcetype )
         {
           case DTST_CLIPBOARD:
           {
+                D(bug("[anim.datatype] %s: DTST_CLIPBOARD\n", __PRETTY_FUNCTION__));
+
               aid -> aid_LoadAll = TRUE;
 
               iff = (struct IFFHandle *)fh;
@@ -1569,10 +781,14 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
               BPTR iff_file_fh;
               BPTR cloned_fh    = NULL;
 
+            D(bug("[anim.datatype] %s: DTST_FILE\n", __PRETTY_FUNCTION__));
+
               iff = (struct IFFHandle *)fh;
 
               /* Attempt to open file from given stream (allows usage of virtual fs when using datatypes.library V45) */
               iff_file_fh = (BPTR)(iff -> iff_Stream); /* see iffparse.library/InitIFFasDOS autodoc */
+
+            D(bug("[anim.datatype] %s: iff file handle @ 0x%p\n", __PRETTY_FUNCTION__, iff_file_fh));
 
               if( iff_file_fh )
               {
@@ -1581,7 +797,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                 if( lock = DupLockFromFH( iff_file_fh ) )
                 {
                   /* Set up a filehandle for disk-based loading (random loading) */
-                  if( !(cloned_fh = (LONG)OpenFromLock( lock )) )
+                  if( !(cloned_fh = (IPTR)OpenFromLock( lock )) )
                   {
                     /* failure */
                     UnLock( lock );
@@ -1593,7 +809,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
               if( cloned_fh == NULL )
               {
                 /* Set up a filehandle for disk-based loading (random loading) */
-                if( !(cloned_fh = (LONG)Open( (aid -> aid_ProjectName), MODE_OLDFILE )) )
+                if (!(cloned_fh = (IPTR)Open( (aid -> aid_ProjectName), MODE_OLDFILE )))
                 {
                   /* Can't open file */
                   error = IoErr();
@@ -1617,6 +833,8 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
 
           case DTST_RAM:
           {
+                D(bug("[anim.datatype] %s: DTST_RAM\n", __PRETTY_FUNCTION__));
+
               /* do nothing */
           }
               break;
@@ -1682,8 +900,11 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                 {
                   struct ContextNode *cn;
 
-                  if( error = ParseIFF( iff, IFFPARSE_SCAN ) )
+                    D(bug("[anim.datatype] %s: Parsing IFF ... \n", __PRETTY_FUNCTION__));
+
+                  if ((error = ParseIFF( iff, IFFPARSE_SCAN ) ) != 0)
                   {
+                     D(bug("[anim.datatype] %s: Done? (%d)\n", __PRETTY_FUNCTION__, error));
                     /* EOF (End Of File) is no error here... */
                     if( error == IFFERR_EOF )
                     {
@@ -1694,12 +915,15 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                   }
 
                   /* Get file position */
-                  if( cn = CurrentChunk( iff ) )
+                  if ((cn = CurrentChunk( iff ) ) != NULL)
                   {
                     pos = 0UL;
 
-                    while( cn = ParentChunk( cn ) )
+                    D(bug("[anim.datatype] %s: cn @ 0x%p\n", __PRETTY_FUNCTION__, cn));
+
+                    while ((cn = ParentChunk( cn ) ) != NULL)
                     {
+                        D(bug("[anim.datatype] %s: parent @ 0x%p\n", __PRETTY_FUNCTION__, cn));
                       pos += cn -> cn_Scan;
                     }
                   }
@@ -1707,17 +931,35 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                   /* bmhd header loaded ? */
                   if( bmhdprop == NULL )
                   {
-                    if( bmhdprop = FindProp( iff, ID_ILBM, ID_BMHD ) )
+                    if ((bmhdprop = FindProp( iff, ID_ILBM, ID_BMHD ) ) != NULL)
                     {
                       ULONG poolsize,
                             availmem;
 
+                        D(bug("[anim.datatype] %s: BitMapHeader = %d bytes (struct %d)\n", __PRETTY_FUNCTION__, bmhdprop-> sp_Size, sizeof(struct BitMapHeader)));
+#if !defined(__AROS__)
                       *bmh = *((struct BitMapHeader *)(bmhdprop -> sp_Data));
+#else
+                    bmh->bmh_Width = AROS_BE2WORD(((struct BitMapHeader *)(bmhdprop -> sp_Data))->bmh_Width);
+                    bmh->bmh_Height = AROS_BE2WORD(((struct BitMapHeader *)(bmhdprop -> sp_Data))->bmh_Height);
+                    bmh->bmh_Left = AROS_BE2WORD(((struct BitMapHeader *)(bmhdprop -> sp_Data))->bmh_Left);
+                    bmh->bmh_Top = AROS_BE2WORD(((struct BitMapHeader *)(bmhdprop -> sp_Data))->bmh_Top);
+                    bmh->bmh_Depth = ((struct BitMapHeader *)(bmhdprop -> sp_Data))->bmh_Depth;
+                    bmh->bmh_Masking = ((struct BitMapHeader *)(bmhdprop -> sp_Data))->bmh_Masking;
+                    bmh->bmh_Compression = ((struct BitMapHeader *)(bmhdprop -> sp_Data))->bmh_Compression;
+//                    bmh->bmh_Pad;
+                    bmh->bmh_Transparent = AROS_BE2WORD(((struct BitMapHeader *)(bmhdprop -> sp_Data))->bmh_Transparent);
+                    bmh->bmh_XAspect = ((struct BitMapHeader *)(bmhdprop -> sp_Data))->bmh_XAspect;
+                    bmh->bmh_YAspect = ((struct BitMapHeader *)(bmhdprop -> sp_Data))->bmh_YAspect;
+                    bmh->bmh_PageWidth = AROS_BE2WORD(((struct BitMapHeader *)(bmhdprop -> sp_Data))->bmh_PageWidth);
+                    bmh->bmh_PageHeight = AROS_BE2WORD(((struct BitMapHeader *)(bmhdprop -> sp_Data))->bmh_PageHeight);
+#endif
 
                       animwidth  = bmh -> bmh_Width;
                       animheight = bmh -> bmh_Height;
                       animdepth  = bmh -> bmh_Depth;
 
+                      D(bug("[anim.datatype] %s: anim dimension %dx%dx%d\n", __PRETTY_FUNCTION__, animwidth, animheight, animdepth));
                       availmem = AvailMem( MEMF_PUBLIC );
 
                       /* Create a seperate pool for frames:
@@ -1731,20 +973,24 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                         poolsize /= 2UL;
                       }
 
+                      D(bug("[anim.datatype] %s: pool size = %d\n", __PRETTY_FUNCTION__, poolsize));
+
+                      
                       /* Create a memory pool for frame bitmaps */
                       if( !(aid -> aid_FramePool = CreatePool( MEMF_PUBLIC, poolsize, poolsize )) )
                       {
                         error = ERROR_NO_FREE_STORE;
                       }
+                      D(bug("[anim.datatype] %s: Frame pool @ 0x%p\n", __PRETTY_FUNCTION__, aid -> aid_FramePool));
                     }
                   }
 
                   /* camg loaded ? */
                   if( camgprop == NULL )
                   {
-                    if( camgprop = FindProp( iff, ID_ILBM, ID_CAMG ) )
+                    if ((camgprop = FindProp( iff, ID_ILBM, ID_CAMG ) ) != NULL)
                     {
-                      modeid = *(ULONG *)(camgprop -> sp_Data);
+                      modeid = AROS_BE2LONG(*(ULONG *)(camgprop -> sp_Data));
 
                       /* Check for invalid flags */
                       if( (!(modeid & MONITOR_ID_MASK)) ||
@@ -1766,7 +1012,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                   /* grab loaded ? */
                   if( grabprop == NULL )
                   {
-                    if( grabprop = FindProp( iff, ID_ILBM, ID_GRAB ) )
+                    if ((grabprop = FindProp( iff, ID_ILBM, ID_GRAB ) ) != NULL)
                     {
                       /* Grab point only available in animation.datatype V41 */
                       if( grabpoint )
@@ -1783,7 +1029,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                   /* dpan loaded ? */
                   if( dpanprop == NULL )
                   {
-                    if( dpanprop = FindProp( iff, ID_ILBM, ID_DPAN ) )
+                    if ((dpanprop = FindProp( iff, ID_ILBM, ID_DPAN ) ) != NULL)
                     {
                       if( (aid -> aid_FPS) == 0UL )
                       {
@@ -1806,12 +1052,12 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                   if( annoprop == NULL )
                   {
                     /* IFF ANNO found ? */
-                    if( annoprop = FindProp( iff, ID_ILBM, ID_ANNO ) )
+                    if ((annoprop = FindProp( iff, ID_ILBM, ID_ANNO ) ) != NULL)
                     {
                       STRPTR buff;
 
                       /* Allocate a temp buffer so that stccpy can add a '\0'-terminator */
-                      if( buff = (STRPTR)AllocVec( ((annoprop -> sp_Size) + 2UL), MEMF_ANY ) )
+                      if ((buff = (STRPTR)AllocVec( ((annoprop -> sp_Size) + 2UL), MEMF_ANY ) ) != NULL)
                       {
                         stccpy( buff, (annoprop -> sp_Data), (int)(annoprop -> sp_Size) );
 
@@ -1832,12 +1078,12 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                   if( authprop == NULL )
                   {
                     /* IFF AUTH found ? */
-                    if( authprop = FindProp( iff, ID_ILBM, ID_AUTH ) )
+                    if ((authprop = FindProp( iff, ID_ILBM, ID_AUTH ) ) != NULL)
                     {
                       STRPTR buff;
 
                       /* Allocate a temp buffer so that stccpy can add a '\0'-terminator */
-                      if( buff = (STRPTR)AllocVec( ((authprop -> sp_Size) + 2UL), MEMF_ANY ) )
+                      if ((buff = (STRPTR)AllocVec( ((authprop -> sp_Size) + 2UL), MEMF_ANY ) ) != NULL)
                       {
                         stccpy( buff, (authprop -> sp_Data), (int)(authprop -> sp_Size) );
 
@@ -1858,12 +1104,12 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                   if( copyrightprop == NULL )
                   {
                     /* IFF (C) found ? */
-                    if( copyrightprop = FindProp( iff, ID_ILBM, ID_Copyright ) )
+                    if ((copyrightprop = FindProp( iff, ID_ILBM, ID_Copyright ) ) != NULL)
                     {
                       STRPTR buff;
 
                       /* Allocate a temp buffer so that stccpy can add a '\0'-terminator */
-                      if( buff = (STRPTR)AllocVec( ((copyrightprop -> sp_Size) + 2UL), MEMF_ANY ) )
+                      if ((buff = (STRPTR)AllocVec( ((copyrightprop -> sp_Size) + 2UL), MEMF_ANY ) ) != NULL)
                       {
                         stccpy( buff, (copyrightprop -> sp_Data), (int)(copyrightprop -> sp_Size) );
 
@@ -1884,12 +1130,12 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                   if( fverprop == NULL )
                   {
                     /* IFF FVER found ? */
-                    if( fverprop = FindProp( iff, ID_ILBM, ID_FVER ) )
+                    if ((fverprop = FindProp( iff, ID_ILBM, ID_FVER ) ) != NULL)
                     {
                       STRPTR buff;
 
                       /* Allocate a temp buffer so that stccpy can add a '\0'-terminator */
-                      if( buff = (STRPTR)AllocVec( ((fverprop -> sp_Size) + 2UL), MEMF_ANY ) )
+                      if ((buff = (STRPTR)AllocVec( ((fverprop -> sp_Size) + 2UL), MEMF_ANY ) ) != NULL)
                       {
                         stccpy( buff, (fverprop -> sp_Data), (int)(fverprop -> sp_Size) );
 
@@ -1910,12 +1156,13 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                   if( nameprop == NULL )
                   {
                     /* IFF NAME found ? */
-                    if( nameprop = FindProp( iff, ID_ILBM, ID_NAME ) )
+                    if ((nameprop = FindProp( iff, ID_ILBM, ID_NAME ) ) != NULL)
                     {
                       STRPTR buff;
 
+                      D(bug("[anim.datatype] %s: Name '%s'\n", __PRETTY_FUNCTION__, nameprop -> sp_Data));
                       /* Allocate a temp buffer so that stccpy can add a '\0'-terminator */
-                      if( buff = (STRPTR)AllocVec( ((nameprop -> sp_Size) + 2UL), MEMF_ANY ) )
+                      if ((buff = (STRPTR)AllocVec( ((nameprop -> sp_Size) + 2UL), MEMF_ANY ) ) != NULL)
                       {
                         stccpy( buff, (nameprop -> sp_Data), (int)(nameprop -> sp_Size) );
 
@@ -1933,19 +1180,22 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                     }
                   }
 
-                  if( cn = CurrentChunk( iff ) )
+                  if ((cn = CurrentChunk( iff ) ) != NULL)
                   {
                     switch( (cn -> cn_Type) )
                     {
                       case ID_ILBM:
                       {
+                            D(bug("[anim.datatype] %s: ID_ILBM\n", __PRETTY_FUNCTION__));
                           switch( (cn -> cn_ID) )
                           {
                             case ID_FORM:
                             {
-                                /* Create an prepare a new frame node */
-                                if( fn = AllocFrameNode( cb, (aid -> aid_Pool) ) )
+                                D(bug("[anim.datatype] %s: ID_FORM\n", __PRETTY_FUNCTION__));
+                                /* Create and prepare a new frame node */
+                                if ((fn = AllocFrameNode( cb, (aid -> aid_Pool) ) ) != NULL)
                                 {
+                                    D(bug("[anim.datatype] %s: FrameNode @ 0x%p\n", __PRETTY_FUNCTION__, fn));
                                   AddTail( (struct List *)(&(aid -> aid_FrameList)), (struct Node *)(&(fn -> fn_Node)) );
 
                                   fn -> fn_TimeStamp = timestamp++;
@@ -1963,6 +1213,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
 
                             case ID_ANHD:
                             {
+                                D(bug("[anim.datatype] %s: ID_ANHD\n", __PRETTY_FUNCTION__));
                                 if( fn )
                                 {
                                   ULONG interleave;
@@ -1970,8 +1221,17 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                   /* Read struct AnimHeader */
                                   error = ReadChunkBytes( iff, (&(fn -> fn_AH)), (LONG)sizeof( struct AnimHeader ) );
                                   if( error == (LONG)sizeof( struct AnimHeader ) ) error = 0L;
-
                                   /* Info */
+
+#if defined(__AROS__)
+                                fn->fn_AH.ah_Width = AROS_BE2WORD(fn->fn_AH.ah_Width);
+                                fn->fn_AH.ah_Height = AROS_BE2WORD(fn->fn_AH.ah_Height);
+                                fn->fn_AH.ah_Left = AROS_BE2WORD(fn->fn_AH.ah_Left);
+                                fn->fn_AH.ah_Top = AROS_BE2WORD(fn->fn_AH.ah_Top);
+                                fn->fn_AH.ah_AbsTime = AROS_BE2LONG(fn->fn_AH.ah_AbsTime);
+                                fn->fn_AH.ah_RelTime = AROS_BE2LONG(fn->fn_AH.ah_RelTime);
+                                fn->fn_AH.ah_Flags = AROS_BE2LONG(fn->fn_AH.ah_Flags);
+#endif
                                   DumpAnimHeader( cb, aid, (fn -> fn_TimeStamp), (&(fn -> fn_AH)) );
 
                                   /* Check if we have dynamic timing */
@@ -1986,24 +1246,29 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                     interleave = 2;
                                   }
 
+                                  D(bug("[anim.datatype] %s: interleave = %d\n", __PRETTY_FUNCTION__, interleave));
                                   /* Get previous frame */
                                   fn -> fn_PrevFrame = GetPrevFrameNode( fn, interleave );
+                                  D(bug("[anim.datatype] %s: PrevFrame @ 0x%p\n", __PRETTY_FUNCTION__, fn -> fn_PrevFrame));
                                 }
                             }
                                 break;
 
                             case ID_CMAP:
                             {
+                                D(bug("[anim.datatype] %s: ID_CMAP\n", __PRETTY_FUNCTION__));
                                 if( fn )
                                 {
                                   UBYTE *buff;
 
                                   /* Allocate buffer */
-                                  if( buff = (UBYTE *)AllocVecPooled( cb, (aid -> aid_Pool), ((cn -> cn_Size) + 16UL) ) )
+                                  if ((buff = (UBYTE *)AllocPooledVec( cb, (aid -> aid_Pool), ((cn -> cn_Size) + 16UL) ) ) != NULL)
                                   {
+                                    D(bug("[anim.datatype] %s: buffer @ 0x%p\n", __PRETTY_FUNCTION__, buff));
                                     /* Load CMAP data */
                                     error = ReadChunkBytes( iff, buff, (cn -> cn_Size) );
 
+                                      D(bug("[anim.datatype] %s: read %d bytes\n", __PRETTY_FUNCTION__, error));
                                     /* All read ? */
                                     if( error == (cn -> cn_Size) )
                                     {
@@ -2013,6 +1278,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                       {
                                         if( !CMAP2Object( cb, o, buff, (cn -> cn_Size) ) )
                                         {
+                                            D(bug("[anim.datatype] %s: failed to map colors to object\n", __PRETTY_FUNCTION__));
                                           /* can't alloc object's color table */
                                           error = ERROR_NO_FREE_STORE;
                                         }
@@ -2027,8 +1293,9 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                         }
                                         else
                                         {
-                                          if( fn -> fn_CMap = CMAP2ColorMap( cb, aid, buff, (cn -> cn_Size) ) )
+                                          if ((fn -> fn_CMap = CMAP2ColorMap( cb, aid, buff, (cn -> cn_Size) ) ) != NULL)
                                           {
+                                            D(bug("[anim.datatype] %s: frame colormap @ 0x%p\n", __PRETTY_FUNCTION__, fn -> fn_CMap));
                                             error = 0L; /* Success ! */
                                             numcmaps++;
                                           }
@@ -2040,8 +1307,13 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                         }
                                       }
                                     }
+                                    D(
+                                    else
+                                    {
+                                       bug("[anim.datatype] %s: != %d bytes !!!!\n", __PRETTY_FUNCTION__, cn -> cn_Size);
+                                    })
 
-                                    FreeVecPooled( cb, (aid -> aid_Pool), buff );
+                                    FreePooledVec( cb, (aid -> aid_Pool), buff );
                                   }
                                   else
                                   {
@@ -2055,6 +1327,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                             case ID_BODY:
                             case ID_DLTA:
                             {
+                                D(bug("[anim.datatype] %s: ID_BODY/ID_DLTA\n", __PRETTY_FUNCTION__));
                                 if( fn )
                                 {
                                   /* Store position of DLTA (pos points to the DLTA ID) */
@@ -2073,7 +1346,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                           UBYTE *buff;
 
                                           /* Allocate buffer */
-                                          if( buff = (UBYTE *)AllocVecPooled( cb, (aid -> aid_Pool), ((cn -> cn_Size) + 32UL) ) )
+                                          if ((buff = (UBYTE *)AllocPooledVec( cb, (aid -> aid_Pool), ((cn -> cn_Size) + 32UL) ) ) != NULL)
                                           {
                                             struct FrameNode *prevfn;
 
@@ -2097,7 +1370,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                               }
                                             }
 
-                                            FreeVecPooled( cb, (aid -> aid_Pool), buff );
+                                            FreePooledVec( cb, (aid -> aid_Pool), buff );
                                           }
                                           else
                                           {
@@ -2134,6 +1407,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                   /* on error: leave for-loop */
                   if( error )
                   {
+                    D(bug("[anim.datatype] %s: error occured\n", __PRETTY_FUNCTION__));
                     break;
                   }
                 }
@@ -2168,7 +1442,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
 
                     worknode = (struct FrameNode *)(aid -> aid_FrameList . mlh_Head);
 
-                    while( nextnode = (struct FrameNode *)(worknode -> fn_Node . mln_Succ) )
+                    while ((nextnode = (struct FrameNode *)(worknode -> fn_Node . mln_Succ) ) != NULL)
                     {
                       if( worknode -> fn_CMap )
                       {
@@ -2240,7 +1514,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
 
               worknode = (struct FrameNode *)(aid -> aid_FrameList . mlh_Head);
 
-              while( nextnode = (struct FrameNode *)(worknode -> fn_Node . mln_Succ) )
+              while ((nextnode = (struct FrameNode *)(worknode -> fn_Node . mln_Succ) ) != NULL)
               {
                 ULONG duration = (worknode -> fn_AH . ah_RelTime) + shift - 1UL;
 
@@ -2258,7 +1532,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
             if( error == 0L )
             {
               /* Alloc bitmap as key bitmap  */
-              if( aid -> aid_KeyBitMap = AllocBitMap( animwidth, animheight, animdepth, (BMF_CLEAR | BMF_MINPLANES), NULL ) )
+              if ((aid -> aid_KeyBitMap = AllocBitMap( animwidth, animheight, animdepth, (BMF_CLEAR | BMF_MINPLANES), NULL ) ) != NULL)
               {
                 struct FrameNode *firstfn = (struct FrameNode *)(aid -> aid_FrameList . mlh_Head); /* short cut to the first FrameNode */
                 
@@ -2419,7 +1693,9 @@ struct FrameNode *AllocFrameNode( struct ClassBase *cb, APTR pool )
 {
     struct FrameNode *fn;
 
-    if( fn = (struct FrameNode *)AllocPooled( pool, (ULONG)sizeof( struct FrameNode ) ) )
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
+    if ((fn = (struct FrameNode *)AllocPooled( pool, (ULONG)sizeof( struct FrameNode ) ) ) != NULL)
     {
       memset( fn, 0, sizeof( struct FrameNode ) );
     }
@@ -2428,9 +1704,10 @@ struct FrameNode *AllocFrameNode( struct ClassBase *cb, APTR pool )
 }
 
 
-static
 struct FrameNode *FindFrameNode( struct MinList *fnl, ULONG timestamp )
 {
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     if( fnl )
     {
       struct FrameNode *worknode,
@@ -2439,7 +1716,7 @@ struct FrameNode *FindFrameNode( struct MinList *fnl, ULONG timestamp )
 
       prevnode = worknode = (struct FrameNode *)(fnl -> mlh_Head);
 
-      while( nextnode = (struct FrameNode *)(worknode -> fn_Node . mln_Succ) )
+      while ((nextnode = (struct FrameNode *)(worknode -> fn_Node . mln_Succ) ) != NULL)
       {
         if( (worknode -> fn_TimeStamp) > timestamp )
         {
@@ -2460,9 +1737,10 @@ struct FrameNode *FindFrameNode( struct MinList *fnl, ULONG timestamp )
 }
 
 
-static
 void FreeFrameNodeResources( struct ClassBase *cb, struct MinList *fnl )
 {
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     if( fnl )
     {
       struct FrameNode *worknode,
@@ -2470,7 +1748,7 @@ void FreeFrameNodeResources( struct ClassBase *cb, struct MinList *fnl )
 
       worknode = (struct FrameNode *)(fnl -> mlh_Head);
 
-      while( nextnode = (struct FrameNode *)(worknode -> fn_Node . mln_Succ) )
+      while ((nextnode = (struct FrameNode *)(worknode -> fn_Node . mln_Succ) ) != NULL)
       {
         if( worknode -> fn_CMap )
         {
@@ -2485,11 +1763,12 @@ void FreeFrameNodeResources( struct ClassBase *cb, struct MinList *fnl )
 
 
 /* Copy bm1 to bm2 */
-static
 void CopyBitMap( struct ClassBase *cb, struct BitMap *bm1, struct BitMap *bm2 )
 {
     ULONG  bpr1 = bm1 -> BytesPerRow;
     ULONG  bpr2 = bm2 -> BytesPerRow;
+
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
 
     /* Same bitmap layout ? */
     if( bpr1 == bpr2 )
@@ -2545,6 +1824,8 @@ void CopyBitMap( struct ClassBase *cb, struct BitMap *bm1, struct BitMap *bm2 )
 static
 void XCopyMem( struct ClassBase *cb, APTR src, APTR dest, ULONG size )
 {
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     /* Check if we can use the optimized CopyMemQuick */
     if( (ALIGN_LONG( src ) == src) && (ALIGN_LONG( dest ) == dest) )
     {
@@ -2568,9 +1849,10 @@ void XCopyMem( struct ClassBase *cb, APTR src, APTR dest, ULONG size )
 }
 
 
-static
 void ClearBitMap( struct BitMap *bm )
 {
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     if( bm )
     {
       ULONG planesize = (ULONG)(bm -> BytesPerRow) * (ULONG)(bm -> Rows);
@@ -2588,6 +1870,8 @@ void ClearBitMap( struct BitMap *bm )
 static
 void XORBitMaps( struct BitMap *op1, struct BitMap *op2 )
 {
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     if( op1 && op2 )
     {
                ULONG  planesize = (ULONG)(op1 -> BytesPerRow) * (ULONG)(op1 -> Rows);
@@ -2629,7 +1913,6 @@ void XORBitMaps( struct BitMap *op1, struct BitMap *op2 )
 }
 
 
-static
 struct BitMap *AllocBitMapPooled( struct ClassBase *cb, ULONG width, ULONG height, ULONG depth, APTR pool )
 {
     struct BitMap *bm;
@@ -2637,11 +1920,13 @@ struct BitMap *AllocBitMapPooled( struct ClassBase *cb, ULONG width, ULONG heigh
                    moredepthsize,
                    size;
 
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     planesize       = (ULONG)RASSIZE( ((width + 63UL) & ~63UL), height );
     moredepthsize   = (depth > 8UL)?((depth - 8UL) * sizeof( PLANEPTR )):(0UL);
     size            = ((ULONG)sizeof( struct BitMap )) + moredepthsize + (planesize * depth) + 31UL;
 
-    if( bm = (struct BitMap *)AllocVecPooled( cb, pool, size ) )
+    if ((bm = (struct BitMap *)AllocPooledVec( cb, pool, size ) ) != NULL)
     {
       UWORD    pl;
       PLANEPTR plane;
@@ -2675,12 +1960,13 @@ struct BitMap *AllocBitMapPooled( struct ClassBase *cb, ULONG width, ULONG heigh
 }
 
 
-static
 BOOL CMAP2Object( struct ClassBase *cb, Object *o, UBYTE *rgb, ULONG rgbsize )
 {
     struct ColorRegister *acm;
     ULONG                *acregs;
-    ULONG                 nc;
+    IPTR                 nc;
+
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
 
     /* file has this many colors (e.g. each color has one byte per R,B,G-gun) */
     nc = rgbsize / 3UL;
@@ -2709,9 +1995,9 @@ BOOL CMAP2Object( struct ClassBase *cb, Object *o, UBYTE *rgb, ULONG rgbsize )
            * This surrounds an OS bug which uses the low-oreder bytes of the 32-bit colors
            * instead of the high order ones
            */
-          acregs[ ((i * 3) + 0) ] = ((ULONG)(acm -> red))   * 0x01010101UL;
-          acregs[ ((i * 3) + 1) ] = ((ULONG)(acm -> green)) * 0x01010101UL;
-          acregs[ ((i * 3) + 2) ] = ((ULONG)(acm -> blue))  * 0x01010101UL;
+          acregs[ ((i * 3) + 0) ] = AROS_BE2LONG(((ULONG)(acm -> red))   * 0x01010101UL);
+          acregs[ ((i * 3) + 1) ] = AROS_BE2LONG(((ULONG)(acm -> green)) * 0x01010101UL);
+          acregs[ ((i * 3) + 2) ] = AROS_BE2LONG(((ULONG)(acm -> blue))  * 0x01010101UL);
         }
 
         return( TRUE );
@@ -2722,15 +2008,16 @@ BOOL CMAP2Object( struct ClassBase *cb, Object *o, UBYTE *rgb, ULONG rgbsize )
 }
 
 
-static
 struct ColorMap *CMAP2ColorMap( struct ClassBase *cb, struct AnimInstData *aid, UBYTE *rgb, ULONG rgbsize )
 {
     struct ColorMap *cm;
     ULONG            a_nc   = (1UL << (ULONG)(aid -> aid_BMH -> bmh_Depth)); /* Number of colors in animation */
     ULONG            rgb_nc = rgbsize / 3UL;                                 /* Number of colors in CMAP      */
 
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     /* Get a colormap which hold all colors */
-    if( cm = GetColorMap( (long)MAX( a_nc, rgb_nc ) ) )
+    if ((cm = GetColorMap( (long)MAX( a_nc, rgb_nc ) ) ) != NULL)
     {
       ULONG i,
             r, g, b;
@@ -2742,7 +2029,7 @@ struct ColorMap *CMAP2ColorMap( struct ClassBase *cb, struct AnimInstData *aid, 
         b = *rgb++;
 
         /* Replicate color information (see CMAP2Object for details) and store them into colormap */
-        SetRGB32CM( cm, i, (r * 0x01010101UL), (g * 0x01010101UL), (b * 0x01010101UL) );
+        SetRGB32CM( cm, i, AROS_BE2LONG(r * 0x01010101UL), AROS_BE2LONG(g * 0x01010101UL), AROS_BE2LONG(b * 0x01010101UL) );
       }
 
       /* BUG: the remaining entries should be filled with colors from the last colormap */
@@ -2756,18 +2043,19 @@ struct ColorMap *CMAP2ColorMap( struct ClassBase *cb, struct AnimInstData *aid, 
 }
 
 
-static
 struct ColorMap *CopyColorMap( struct ClassBase *cb, struct ColorMap *src )
 {
     struct ColorMap *dest = NULL;
+
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
 
     if( src )
     {
       ULONG *ctable;
 
-      if( ctable = (ULONG *)AllocVec( ((ULONG)(src -> Count) * sizeof( ULONG ) * 3UL), MEMF_PUBLIC ) )
+      if ((ctable = (ULONG *)AllocVec( ((ULONG)(src -> Count) * sizeof( ULONG ) * 3UL), MEMF_PUBLIC ) ) != NULL)
       {
-        if( dest = GetColorMap( (long)(src -> Count) ) )
+        if ((dest = GetColorMap( (long)(src -> Count) ) ) != NULL)
         {
           ULONG i;
 
@@ -2793,17 +2081,17 @@ struct ColorMap *CopyColorMap( struct ClassBase *cb, struct ColorMap *src )
 
 #ifndef DEBUG_POOLS
 static
-APTR AllocVecPooled( struct ClassBase *cb, APTR pool, ULONG memsize )
+APTR AllocPooledVec( struct ClassBase *cb, APTR pool, ULONG memsize )
 {
-    ULONG *memory = NULL;
+    IPTR *memory = NULL;
 
     if( pool && memsize )
     {
-      memsize += (ULONG)sizeof( ULONG );
+      memsize += (IPTR)sizeof( IPTR );
 
-      if( memory = (ULONG *)AllocPooled( pool, memsize ) )
+      if( memory = (IPTR *)AllocPooled( pool, memsize ) )
       {
-        (*memory) = memsize;
+        (*memory) = (IPTR)memsize;
 
         memory++;
       }
@@ -2814,13 +2102,13 @@ APTR AllocVecPooled( struct ClassBase *cb, APTR pool, ULONG memsize )
 
 
 static
-void FreeVecPooled( struct ClassBase *cb, APTR pool, APTR mem )
+void FreePooledVec( struct ClassBase *cb, APTR pool, APTR mem )
 {
     if( pool && mem )
     {
-      ULONG *memory;
+      IPTR *memory;
 
-      memory = (ULONG *)mem;
+      memory = (IPTR *)mem;
 
       memory--;
 
@@ -2830,22 +2118,21 @@ void FreeVecPooled( struct ClassBase *cb, APTR pool, APTR mem )
 #else
 #define MY_MAGIC_MEMID (0xD0ADEAD0UL)
 
-static
-APTR AllocVecPooled( struct ClassBase *cb, APTR pool, ULONG memsize )
+APTR AllocPooledVec( struct ClassBase *cb, APTR pool, ULONG memsize )
 {
-    ULONG *memory = NULL;
+    IPTR *memory = NULL;
 
     if( pool && memsize )
     {
-      memsize += (ULONG)sizeof( ULONG );
+      memsize += (ULONG)sizeof( IPTR );
       memsize += (ULONG)sizeof( APTR );
 
-      if( memory = (ULONG *)AllocPooled( pool, memsize ) )
+      if ((memory = (IPTR *)AllocPooled( pool, memsize ) ) != NULL)
       {
-        (*memory) = memsize;
+        (*memory) = (IPTR)memsize;
         memory++;
 
-        (*memory) = (ULONG)pool;
+        (*memory) = (IPTR)pool;
         memory++;
 
         (*memory) = MY_MAGIC_MEMID;
@@ -2857,14 +2144,13 @@ APTR AllocVecPooled( struct ClassBase *cb, APTR pool, ULONG memsize )
 }
 
 
-static
-void FreeVecPooled( struct ClassBase *cb, APTR pool, APTR mem )
+void FreePooledVec( struct ClassBase *cb, APTR pool, APTR mem )
 {
     if( pool && mem )
     {
-      ULONG *memory;
+      IPTR *memory;
 
-      memory = (ULONG *)mem;
+      memory = (IPTR *)mem;
 
       memory--;
 
@@ -2876,7 +2162,7 @@ void FreeVecPooled( struct ClassBase *cb, APTR pool, APTR mem )
 
       memory--;
 
-      if( *memory != (ULONG)pool )
+      if( *memory != (IPTR)pool )
       {
         D( kprintf( "wrong pool %lx %lx\n", pool, *memory ) );
         return;
@@ -2890,10 +2176,11 @@ void FreeVecPooled( struct ClassBase *cb, APTR pool, APTR mem )
 #endif /* DEBUG_POOLS */
 
 
-static
 LONG DrawDLTA( struct ClassBase *cb, struct AnimInstData *aid, struct BitMap *prevbm, struct BitMap *bm, struct AnimHeader *ah, UBYTE *dlta, ULONG dltasize )
 {
     LONG error = 0L;
+
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
 
     if( bm && ah && dlta && dltasize )
     {
@@ -2920,7 +2207,7 @@ LONG DrawDLTA( struct ClassBase *cb, struct AnimInstData *aid, struct BitMap *pr
         case acmpAnimJ:   /* 'J' */
         {
             /* unpack ANIM-J  */
-            return( unpackanimjdelta( cb, dlta, dltasize, prevbm, bm ) );
+            return( unpackanimjdelta(ah, cb, dlta, dltasize, prevbm, bm ) );
         }
       }
 
@@ -2976,13 +2263,13 @@ LONG DrawDLTA( struct ClassBase *cb, struct AnimInstData *aid, struct BitMap *pr
 
         case acmpLongDelta:         /* 2 */
         {
-            error = unpacklongdelta( unpackbm, dlta, dltasize );
+            error = unpacklongdelta(ah, unpackbm, dlta, dltasize );
         }
             break;
 
         case acmpShortDelta:        /* 3 */
         {
-            error = unpackshortdelta( unpackbm, dlta, dltasize );
+            error = unpackshortdelta(ah, unpackbm, dlta, dltasize );
         }
             break;
 
@@ -2991,11 +2278,11 @@ LONG DrawDLTA( struct ClassBase *cb, struct AnimInstData *aid, struct BitMap *pr
 #ifdef COMMENTED_OUT
             if( (ah -> ah_Flags) & ahfLongData )
             {
-              error = unpackanim4longdelta( unpackbm, dlta, dltasize, (ah -> ah_Flags) );
+              error = unpackanim4longdelta(ah, unpackbm, dlta, dltasize, (ah -> ah_Flags) );
             }
             else
             {
-              error = unpackanim4worddelta( unpackbm, dlta, dltasize, (ah -> ah_Flags) );
+              error = unpackanim4worddelta(ah, unpackbm, dlta, dltasize, (ah -> ah_Flags) );
             }
 #else
             error_printf( cb, aid, "\adlta: acmpDelta disabled, call author (gisburn@w-specht.rhein-ruhr.de)\n"
@@ -3009,7 +2296,7 @@ LONG DrawDLTA( struct ClassBase *cb, struct AnimInstData *aid, struct BitMap *pr
         case acmpByteDelta:         /* 5 */
         case acmpStereoByteDelta:   /* 6 */
         {
-            error = unpackbytedelta( unpackbm, dlta, dltasize );
+            error = unpackbytedelta(ah, unpackbm, dlta, dltasize );
         }
             break;
 
@@ -3017,11 +2304,11 @@ LONG DrawDLTA( struct ClassBase *cb, struct AnimInstData *aid, struct BitMap *pr
         {
             if( (ah -> ah_Flags) & ahfLongData )
             {
-              error = unpackanim7longdelta( unpackbm, dlta, dltasize );
+              error = unpackanim7longdelta(ah, unpackbm, dlta, dltasize );
             }
             else
             {
-              error = unpackanim7worddelta( unpackbm, dlta, dltasize );
+              error = unpackanim7worddelta(ah, unpackbm, dlta, dltasize );
             }
         }
             break;
@@ -3030,11 +2317,11 @@ LONG DrawDLTA( struct ClassBase *cb, struct AnimInstData *aid, struct BitMap *pr
         {
             if( (ah -> ah_Flags) & ahfLongData )
             {
-              error = unpackanim8longdelta( unpackbm, dlta, dltasize );
+              error = unpackanim8longdelta(ah, unpackbm, dlta, dltasize );
             }
             else
             {
-              error = unpackanim8worddelta( unpackbm, dlta, dltasize );
+              error = unpackanim8worddelta(ah, unpackbm, dlta, dltasize );
             }
         }
             break;
@@ -3055,7 +2342,7 @@ LONG DrawDLTA( struct ClassBase *cb, struct AnimInstData *aid, struct BitMap *pr
 
       if( tempbm )
       {
-        FreeVecPooled( cb, (aid -> aid_FramePool), tempbm );
+        FreePooledVec( cb, (aid -> aid_FramePool), tempbm );
       }
     }
 
@@ -3066,6 +2353,8 @@ LONG DrawDLTA( struct ClassBase *cb, struct AnimInstData *aid, struct BitMap *pr
 static
 void DumpAnimHeader( struct ClassBase *cb, struct AnimInstData *aid, ULONG ti, struct AnimHeader *anhd )
 {
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     if( anhd )
     {
       verbose_printf( cb, aid, "%4lu: ", ti );
@@ -3114,10 +2403,12 @@ struct FrameNode *GetPrevFrameNode( struct FrameNode *currfn, ULONG interleave )
     struct FrameNode *worknode,
                      *prevnode;
 
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     /* Get previous frame */
     worknode = currfn;
 
-    while( prevnode = (struct FrameNode *)(worknode -> fn_Node . mln_Pred) )
+    while ((prevnode = (struct FrameNode *)(worknode -> fn_Node . mln_Pred) ) != NULL)
     {
       if( (interleave-- == 0U) || ((prevnode -> fn_Node . mln_Pred) == NULL) )
       {
@@ -3131,14 +2422,15 @@ struct FrameNode *GetPrevFrameNode( struct FrameNode *currfn, ULONG interleave )
 }
 
 
-static
 void OpenLogfile( struct ClassBase *cb, struct AnimInstData *aid )
 {
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     if( (aid -> aid_VerboseOutput) == NULL )
     {
       STRPTR confile;
 
-      if( confile = (STRPTR)AllocVec( (((aid -> aid_ProjectName)?(strlen( (aid -> aid_ProjectName) )):(0UL)) + 100UL), MEMF_PUBLIC ) )
+      if ((confile = (STRPTR)AllocVec( (((aid -> aid_ProjectName)?(strlen( (aid -> aid_ProjectName) )):(0UL)) + 100UL), MEMF_PUBLIC ) ) != NULL)
       {
         mysprintf( cb, confile, "CON:////Anim DataType %s/auto/wait/close/inactive",
                    ((aid -> aid_ProjectName)?(FilePart( (aid -> aid_ProjectName) )):(NULL)) );
@@ -3151,7 +2443,6 @@ void OpenLogfile( struct ClassBase *cb, struct AnimInstData *aid )
 }
 
 
-static
 void mysprintf( struct ClassBase *cb, STRPTR buffer, STRPTR fmt, ... )
 {
     APTR args;
@@ -3162,7 +2453,6 @@ void mysprintf( struct ClassBase *cb, STRPTR buffer, STRPTR fmt, ... )
 }
 
 
-static
 void error_printf( struct ClassBase *cb, struct AnimInstData *aid, STRPTR format, ... )
 {
     OpenLogfile( cb, aid );
@@ -3174,7 +2464,6 @@ void error_printf( struct ClassBase *cb, struct AnimInstData *aid, STRPTR format
 }
 
 
-static
 void verbose_printf( struct ClassBase *cb, struct AnimInstData *aid, STRPTR format, ... )
 {
     if( aid -> aid_VerboseOutput )
@@ -3187,6 +2476,8 @@ void verbose_printf( struct ClassBase *cb, struct AnimInstData *aid, STRPTR form
 static
 void AttachSample( struct ClassBase *cb, struct AnimInstData *aid )
 {
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     if( aid -> aid_Sample )
     {
       struct FrameNode *worknode,
@@ -3213,7 +2504,7 @@ void AttachSample( struct ClassBase *cb, struct AnimInstData *aid )
 
       worknode = (struct FrameNode *)(aid -> aid_FrameList . mlh_Head);
 
-      while( nextnode = (struct FrameNode *)(worknode -> fn_Node . mln_Succ) )
+      while ((nextnode = (struct FrameNode *)(worknode -> fn_Node . mln_Succ) ) != NULL)
       {
         worknode -> fn_Sample       = sample;
         worknode -> fn_SampleLength = samplesperframe * ((worknode -> fn_Duration) + 1UL);
@@ -3236,11 +2527,12 @@ void AttachSample( struct ClassBase *cb, struct AnimInstData *aid )
 }
 
 
-static
 ULONG SaveIFFAnim( struct ClassBase *cb, struct IClass *cl, Object *o, struct dtWrite *dtw )
 {
     ULONG retval = 0UL;
     LONG  error  = 0L;
+
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
 
     /* A NULL file handle is a nop (GMultiView uses this to test if a datatype supports RAW writing) */
     if( dtw -> dtw_FileHandle )
@@ -3248,15 +2540,15 @@ ULONG SaveIFFAnim( struct ClassBase *cb, struct IClass *cl, Object *o, struct dt
       struct AnimInstData *aid = (struct AnimInstData *)INST_DATA( cl, o );
 
       struct BitMapHeader *bmh;
-      ULONG                modeid;
+      IPTR                modeid;
       ULONG               *cregs;
-      ULONG                numcolors;
-      ULONG                startframe = 0UL,
+      IPTR                numcolors;
+      IPTR                startframe = 0UL,
                            numframes  = 0UL,
                            framestep  = 1UL;
-      ULONG                fps = 0UL;
+      IPTR                fps = 0UL;
       struct BitMap       *keyframe;
-      ULONG                animwidth,
+      IPTR                animwidth,
                            animheight,
                            animdepth;
 
@@ -3289,7 +2581,7 @@ ULONG SaveIFFAnim( struct ClassBase *cb, struct IClass *cl, Object *o, struct dt
 
           tstate = dtw -> dtw_AttrList;
 
-          while( ti = NextTagItem( (&tstate) ) )
+          while ((ti = NextTagItem( (&tstate) ) ) != NULL)
           {
             switch( ti -> ti_Tag )
             {
@@ -3305,9 +2597,9 @@ ULONG SaveIFFAnim( struct ClassBase *cb, struct IClass *cl, Object *o, struct dt
 
           if( numframes )
           {
-            if( ac = CreateAnimContext( cb, animwidth, animheight, animdepth ) )
+            if ((ac = CreateAnimContext( cb, animwidth, animheight, animdepth ) ) != NULL)
             {
-              if( iff = CreateDOSIFFHandle( cb, (dtw -> dtw_FileHandle) ) )
+              if ((iff = CreateDOSIFFHandle( cb, (dtw -> dtw_FileHandle) ) ) != NULL)
               {
                 if( !(error = StartIFFAnim3( cb, aid, iff, ac, (&xbmh), modeid, cregs, numcolors, numframes, fps, keyframe )) )
                 {
@@ -3364,7 +2656,7 @@ ULONG SaveIFFAnim( struct ClassBase *cb, struct IClass *cl, Object *o, struct dt
 
                       if( alf . alf_CMap )
                       {
-                        if( cmap_cregs = (ULONG *)AllocVec( (((sizeof( ULONG ) * 3UL) + 1UL) * numcolors), MEMF_PUBLIC ) )
+                        if ((cmap_cregs = (ULONG *)AllocVec( (((sizeof( ULONG ) * 3UL) + 1UL) * numcolors), MEMF_PUBLIC ) ) != NULL)
                         {
                           GetRGB32( (alf . alf_CMap), 0UL, numcolors, cmap_cregs );
                         }
@@ -3377,7 +2669,7 @@ ULONG SaveIFFAnim( struct ClassBase *cb, struct IClass *cl, Object *o, struct dt
 
                       if( alf . alf_BitMap )
                       {
-                        if( error = WriteIFFAnim3( cb, iff, ac, ((timestamp * 60UL) / fps), (60UL / fps), (&xbmh), cmap_cregs, numcolors, (alf . alf_BitMap) ) )
+                        if ((error = WriteIFFAnim3( cb, iff, ac, ((timestamp * 60UL) / fps), (60UL / fps), (&xbmh), cmap_cregs, numcolors, (alf . alf_BitMap) ) ) != 0)
                         {
                           error_printf( cb, aid, "error while writing IFF ANIM-3, aborted\n" );
                         }
@@ -3448,9 +2740,11 @@ struct IFFHandle *CreateDOSIFFHandle( struct ClassBase *cb, BPTR fh )
 {
     struct IFFHandle *iff;
 
-    if( iff = AllocIFF() )
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
+    if ((iff = AllocIFF() ) != NULL)
     {
-      iff -> iff_Stream = (ULONG)fh;
+      iff -> iff_Stream = (IPTR)fh;
 
       InitIFFasDOS( iff );
     }
@@ -3463,22 +2757,24 @@ static
 LONG StartIFFAnim3( struct ClassBase *cb, struct AnimInstData *aid, struct IFFHandle *iff, struct AnimContext *ac, struct BitMapHeader *bmh, ULONG modeid, ULONG *cregs, ULONG numcolors, ULONG numframes, ULONG fps, struct BitMap *bm )
 {
     LONG error;
+    
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
 
     if( !(error = OpenIFF( iff, IFFF_WRITE )) )
     {
       for( ;; ) /* not a loop, used as a jump table */
       {
-        if( error = PushChunk( iff, ID_ANIM, ID_FORM, IFFSIZE_UNKNOWN ) )
+        if ((error = PushChunk( iff, ID_ANIM, ID_FORM, IFFSIZE_UNKNOWN ) ) != 0)
           break;
 
         /* write initial FORM ILBM */
         {
-          if( error = PushChunk( iff, ID_ILBM, ID_FORM, IFFSIZE_UNKNOWN ) )
+          if ((error = PushChunk( iff, ID_ILBM, ID_FORM, IFFSIZE_UNKNOWN ) ) != 0)
             break;
 
           /* write ILBM BMHD (BitMapHeader) */
           {
-            if( error = PushChunk( iff, 0UL, ID_BMHD, IFFSIZE_UNKNOWN ) )
+            if ((error = PushChunk( iff, 0UL, ID_BMHD, IFFSIZE_UNKNOWN ) ) != 0)
               break;
 
             if( WriteChunkBytes( iff, (APTR)bmh, sizeof( struct BitMapHeader ) ) != sizeof( struct BitMapHeader ) )
@@ -3487,12 +2783,12 @@ LONG StartIFFAnim3( struct ClassBase *cb, struct AnimInstData *aid, struct IFFHa
               break;
             }
 
-            if( error = PopChunk( iff ) )
+            if ((error = PopChunk( iff ) ) != 0)
               break;
           }
 
           /* write ILBM CMAP (global color map) */
-          if( error = PutILBMCMAP( cb, iff, cregs, numcolors ) )
+          if ((error = PutILBMCMAP( cb, iff, cregs, numcolors ) ) != 0)
             break;
 
           /* write ILBM DPAN chunk */
@@ -3503,7 +2799,7 @@ LONG StartIFFAnim3( struct ClassBase *cb, struct AnimInstData *aid, struct IFFHa
             dpan . dpan_nframes = numframes;
             dpan . dpan_FPS     = fps;
 
-            if( error = PushChunk( iff, 0UL, ID_DPAN, IFFSIZE_UNKNOWN ) )
+            if ((error = PushChunk( iff, 0UL, ID_DPAN, IFFSIZE_UNKNOWN ) ) != 0)
               break;
 
             if( WriteChunkBytes( iff, (APTR)(&dpan), sizeof( struct DPAnimChunk ) ) != sizeof( struct DPAnimChunk ) )
@@ -3512,13 +2808,13 @@ LONG StartIFFAnim3( struct ClassBase *cb, struct AnimInstData *aid, struct IFFHa
               break;
             }
 
-            if( error = PopChunk( iff ) )
+            if ((error = PopChunk( iff ) ) != 0)
               break;
           }
 
           /* write ILBM CAMG (amiga view mode) */
           {
-            if( error = PushChunk( iff, 0UL, ID_CAMG, IFFSIZE_UNKNOWN ) )
+            if ((error = PushChunk( iff, 0UL, ID_CAMG, IFFSIZE_UNKNOWN ) ) != 0)
               break;
 
             if( WriteChunkBytes( iff, (APTR)(&modeid), sizeof( ULONG ) ) != sizeof( ULONG ) )
@@ -3527,14 +2823,14 @@ LONG StartIFFAnim3( struct ClassBase *cb, struct AnimInstData *aid, struct IFFHa
               break;
             }
 
-            if( error = PopChunk( iff ) )
+            if ((error = PopChunk( iff ) ) != 0)
               break;
           }
 
           /* Write ILBM BODY (if there is one...) */
           if( bm )
           {
-            if( error = PutILBMBody( cb, iff, bm, bmh ) )
+            if ((error = PutILBMBody( cb, iff, bm, bmh ) ) != 0)
               break;
 
             /* Copy current bitmap into both buffers */
@@ -3543,7 +2839,7 @@ LONG StartIFFAnim3( struct ClassBase *cb, struct AnimInstData *aid, struct IFFHa
             CopyBitMap( cb, bm, CurrFrame( cb, ac ) );
           }
 
-          if( error = PopChunk( iff ) )
+          if ((error = PopChunk( iff ) ) != 0)
             break;
         }
 
@@ -3567,11 +2863,13 @@ LONG StartIFFAnim3( struct ClassBase *cb, struct AnimInstData *aid, struct IFFHa
 static
 void EndIFFAnim3( struct ClassBase *cb, struct AnimInstData *aid, struct IFFHandle *iff )
 {
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     if( iff )
     {
       LONG error;
 
-      if( error = PopChunk( iff ) )
+      if ((error = PopChunk( iff ) ) != 0)
       {
         error_printf( cb, aid, "error while popping IFF ANIM-3 FORM %ld\n", error );
       }
@@ -3588,11 +2886,13 @@ LONG WriteIFFAnim3( struct ClassBase *cb, struct IFFHandle *iff, struct AnimCont
 {
     LONG error = 0L;
 
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     for( ;; ) /* not a loop, used as a jump-table */
     {
       /* write FORM ILBM */
       {
-        if( error = PushChunk( iff, ID_ILBM, ID_FORM, IFFSIZE_UNKNOWN ) )
+        if ((error = PushChunk( iff, ID_ILBM, ID_FORM, IFFSIZE_UNKNOWN ) ) != 0)
           break;
 
         /* write ILBM ANHD (AnimHeader) */
@@ -3604,7 +2904,7 @@ LONG WriteIFFAnim3( struct ClassBase *cb, struct IFFHandle *iff, struct AnimCont
           animheader . ah_RelTime    = reltime;
           animheader . ah_Interleave = 2U;
 
-          if( error = PushChunk( iff, 0UL, ID_ANHD, IFFSIZE_UNKNOWN ) )
+          if ((error = PushChunk( iff, 0UL, ID_ANHD, IFFSIZE_UNKNOWN ) ) != 0)
             break;
 
           if( WriteChunkBytes( iff, (APTR)(&animheader), sizeof( struct AnimHeader ) ) != sizeof( struct AnimHeader ) )
@@ -3613,26 +2913,26 @@ LONG WriteIFFAnim3( struct ClassBase *cb, struct IFFHandle *iff, struct AnimCont
             break;
           }
 
-          if( error = PopChunk( iff ) )
+          if ((error = PopChunk( iff ) ) != 0)
             break;
         }
 
         /* Palette change ? */
         if( cregs && numcolors )
         {
-          if( error = PutILBMCMAP( cb, iff, cregs, numcolors ) )
+          if ((error = PutILBMCMAP( cb, iff, cregs, numcolors ) ) != 0)
             break;
         }
 
         /* Write ANIM-3 delta */
-        if( error = PutAnim3Delta( cb, iff, ac, CurrFrame( cb, ac ), bm ) )
+        if ((error = PutAnim3Delta( cb, iff, ac, CurrFrame( cb, ac ), bm ) ) != 0)
           break;
 
         /* Copy current bitmap into buffer, then swap to next frame */
         CopyBitMap( cb, bm, CurrFrame( cb, ac ) );
         SwapFrames( cb, ac );
 
-        if( error = PopChunk( iff ) )
+        if ((error = PopChunk( iff ) ) != 0)
           break;
       }
 
@@ -3649,12 +2949,14 @@ LONG PutAnim3Delta( struct ClassBase *cb, struct IFFHandle *iff, struct AnimCont
     LONG    error;
     ULONG   len;
 
-    ULONG  *ptrs = (ULONG *)(ac -> ac_WorkBuffer);
+    IPTR  *ptrs = (IPTR *)(ac -> ac_WorkBuffer);
     WORD   *data = (WORD *)(ptrs + 8UL);  /* data space starts after the 8 byte pointers... */
     UBYTE   plane;
     ULONG   planesize = ((bm -> BytesPerRow) * (bm -> Rows)) / sizeof( WORD ); /* size of plane,
                                                                                 * in compression units (WORD).
                                                                                 */
+
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
 
     memset( (ac -> ac_WorkBuffer), 0, (size_t)(ac -> ac_WorkBufferSize) );
 
@@ -3665,7 +2967,7 @@ LONG PutAnim3Delta( struct ClassBase *cb, struct IFFHandle *iff, struct AnimCont
       WORD  *planedata     = (WORD *)(bm -> Planes[ plane ]),
             *prevplanedata = (WORD *)(prevbm -> Planes[ plane ]);
 
-      ptrs[ plane ] = (ULONG)((UBYTE *)data - (UBYTE *)(ac -> ac_WorkBuffer));
+      ptrs[ plane ] = (IPTR)((UBYTE *)data - (UBYTE *)(ac -> ac_WorkBuffer));
 
       for( i = 0 ; i < planesize ; i++ )
       {
@@ -3704,7 +3006,7 @@ LONG PutAnim3Delta( struct ClassBase *cb, struct IFFHandle *iff, struct AnimCont
       }
 
       /* No changes ? */
-      if( ptrs[ plane ] == (ULONG)((UBYTE *)data - (UBYTE *)(ac -> ac_WorkBuffer)) )
+      if( ptrs[ plane ] == (IPTR)((UBYTE *)data - (UBYTE *)(ac -> ac_WorkBuffer)) )
       {
         ptrs[ plane ] = 0UL;
       }
@@ -3714,7 +3016,7 @@ LONG PutAnim3Delta( struct ClassBase *cb, struct IFFHandle *iff, struct AnimCont
       }
     }
 
-    if( error = PushChunk( iff, 0UL, ID_DLTA, IFFSIZE_UNKNOWN ) )
+    if ((error = PushChunk( iff, 0UL, ID_DLTA, IFFSIZE_UNKNOWN ) ) != 0)
       return( error );
 
     len = (ULONG)((UBYTE *)data - (UBYTE *)(ac -> ac_WorkBuffer));
@@ -3740,7 +3042,9 @@ LONG PutILBMCMAP( struct ClassBase *cb, struct IFFHandle *iff, ULONG *cregs, ULO
     ULONG                i;
     struct ColorRegister cm;
 
-    if( error = PushChunk( iff, 0UL, ID_CMAP, IFFSIZE_UNKNOWN ) )
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
+    if ((error = PushChunk( iff, 0UL, ID_CMAP, IFFSIZE_UNKNOWN ) ) != 0)
       return( error );
 
     for( i = 0UL ; i < numcolors ; i++ )
@@ -3779,12 +3083,14 @@ LONG PutILBMBody( struct ClassBase *cb, struct IFFHandle *iff, struct BitMap *bi
              iRow;
     BYTE    *planes[ 24 ]; /* array of ptrs to planes & mask */
 
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     /* Copy the ptrs to bit & mask planes into local array "planes" */
     for( iPlane = 0 ; iPlane < planeCnt; iPlane++ )
        planes[ iPlane ] = (BYTE *)(bitmap -> Planes[ iPlane ]);
 
     /* Write out a BODY chunk header */
-    if( error = PushChunk( iff, 0L, ID_BODY, IFFSIZE_UNKNOWN ) )
+    if ((error = PushChunk( iff, 0L, ID_BODY, IFFSIZE_UNKNOWN ) ) != 0)
       return( error );
 
     /* Write out the BODY contents */
@@ -3812,11 +3118,13 @@ struct AnimContext *CreateAnimContext( struct ClassBase *cb, ULONG width, ULONG 
 {
     APTR pool;
 
-    if( pool = CreatePool( (MEMF_PUBLIC | MEMF_CLEAR), 1024UL, 1024UL ) )
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
+    if ((pool = CreatePool( (MEMF_PUBLIC | MEMF_CLEAR), 1024UL, 1024UL ) ) != (APTR)NULL)
     {
       struct AnimContext *ac;
 
-      if( ac = (struct AnimContext *)AllocVecPooled( cb, pool, sizeof( struct AnimContext ) ) )
+      if ((ac = (struct AnimContext *)AllocPooledVec( cb, pool, sizeof( struct AnimContext ) ) ) != NULL)
       {
         /* Alloc two bitmaps, used for interleaving */
         ac -> ac_BitMap[ 0 ] = AllocBitMapPooled( cb, width, height, depth, pool );
@@ -3825,7 +3133,7 @@ struct AnimContext *CreateAnimContext( struct ClassBase *cb, ULONG width, ULONG 
         /* Alloc work buffer large enougth to hold fancy things... */
 
         ac -> ac_WorkBufferSize = (width * height * depth * 2UL) + 1024UL;
-        ac -> ac_WorkBuffer     = (UBYTE *)AllocVecPooled( cb, pool, (ac -> ac_WorkBufferSize) );
+        ac -> ac_WorkBuffer     = (UBYTE *)AllocPooledVec( cb, pool, (ac -> ac_WorkBufferSize) );
 
         if( (ac -> ac_BitMap[ 0 ]) && (ac -> ac_BitMap[ 1 ]) && (ac -> ac_WorkBuffer) )
         {
@@ -3845,6 +3153,8 @@ struct AnimContext *CreateAnimContext( struct ClassBase *cb, ULONG width, ULONG 
 static
 struct BitMap *PrevFrame( struct ClassBase *cb, struct AnimContext *ac )
 {
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     if( ac )
     {
       return( (ac -> ac_BitMap[ ((ac -> ac_WhichBitMap) ^ 1) ]) );
@@ -3858,6 +3168,8 @@ struct BitMap *PrevFrame( struct ClassBase *cb, struct AnimContext *ac )
 static
 void SwapFrames( struct ClassBase *cb, struct AnimContext *ac )
 {
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     if( ac )
     {
       ac -> ac_WhichBitMap ^= 1; /* Toggle buffer */
@@ -3868,6 +3180,8 @@ void SwapFrames( struct ClassBase *cb, struct AnimContext *ac )
 static
 struct BitMap *CurrFrame( struct ClassBase *cb, struct AnimContext *ac )
 {
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     if( ac )
     {
       return( (ac -> ac_BitMap[ (ac -> ac_WhichBitMap) ]) );
@@ -3880,6 +3194,8 @@ struct BitMap *CurrFrame( struct ClassBase *cb, struct AnimContext *ac )
 static
 void DeleteAnimContext( struct ClassBase *cb, struct AnimContext *ac )
 {
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
     if( ac )
     {
       DeletePool( (ac -> ac_Pool) );

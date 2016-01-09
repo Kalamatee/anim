@@ -39,6 +39,7 @@
 #include <datatypes/animationclassext.h> /* animation.datatype V41 extensions */
 
 /* amiga prototypes */
+#ifdef __SASC
 #include <clib/macros.h>
 #include <clib/exec_protos.h>
 #include <clib/utility_protos.h>
@@ -63,10 +64,28 @@
 #include <pragmas/dtclass_pragmas.h>
 #include <pragmas/iffparse_pragmas.h>
 #include <pragmas/alib_pragmas.h> /* amiga.lib stubs (tagcall pragmas) */
+#else
+#include <proto/exec.h>
+#include <proto/utility.h>
+#include <proto/dos.h>
+#include <proto/graphics.h>
+#include <proto/cybergraphics.h>
+#include <proto/intuition.h>
+#include <proto/datatypes.h>
+#include <proto/dtclass.h>
+#include <proto/iffparse.h>
+
+#include <clib/alib_protos.h>
+#endif
 
 /* ANSI includes */
 #include <string.h>
 #include <limits.h>
+
+/* Use asyncronous I/O below. Disabled due problems with Seek'ing */
+#if 0
+#define DOASYNCIO 1
+#endif
 
 /*****************************************************************************/
 
@@ -74,6 +93,7 @@
 struct ClassBase
 {
     struct ClassLibrary     cb_Lib;
+#if !defined(__AROS__)
     struct ExecBase        *cb_SysBase;
     struct Library         *cb_UtilityBase;
     struct Library         *cb_DOSBase;
@@ -83,11 +103,13 @@ struct ClassBase
     struct Library         *cb_DataTypesBase;
     struct Library         *cb_SuperClassBase;
     BPTR                    cb_SegList;
-    struct SignalSemaphore  cb_Lock;           /* Access lock */
+#endif
+     struct SignalSemaphore  cb_Lock;           /* Access lock */
 };
 
 /*****************************************************************************/
 
+#ifdef __SASC
 /* SASC specific defines */
 #define DISPATCHERFLAGS __saveds __asm
 #define ASM __asm
@@ -98,9 +120,24 @@ struct ClassBase
 #define REGA2 register __a2
 /* ... */
 #define REGA6 register __a6
+#else
+#ifdef __GNUC__
+#define DISPATCHERFLAGS
+#define ASM
+#define REGD0
+#define REGA0
+#define REGA1
+#define REGA2
+#define REGA6
+#define __stdargs
+#else
+#error unsupported compiler
+#endif
+#endif /* __SASC */
 
 /*****************************************************************************/
 
+#if !defined(__AROS__)
 #define SysBase        (cb -> cb_SysBase)
 #define UtilityBase    (cb -> cb_UtilityBase)
 #define DOSBase        (cb -> cb_DOSBase)
@@ -108,14 +145,21 @@ struct ClassBase
 #define GfxBase        (cb -> cb_GfxBase)
 #define IntuitionBase  (cb -> cb_IntuitionBase)
 #define DataTypesBase  (cb -> cb_DataTypesBase)
+#endif
 
 /*****************************************************************************/
 
+#if defined(__AROS__)
+#define ABS(x) x
+#define	MIN(a,b) (((a) < (b)) ?	(a) : (b))
+#define	MAX(a,b) (((a) > (b)) ?	(a) : (b))
+#endif
+
 /* Align memory on 4 byte boundary */
-#define ALIGN_LONG( mem ) ((APTR)((((ULONG)(mem)) + 3UL) & ~3UL))
+#define ALIGN_LONG( mem ) ((APTR)((((IPTR)(mem)) + 3UL) & ~3UL))
 
 /* Align memory on 16 byte boundary */
-#define ALIGN_QUADLONG( mem ) ((APTR)((((ULONG)(mem)) + 15UL) & ~15UL))
+#define ALIGN_QUADLONG( mem ) ((APTR)((((IPTR)(mem)) + 15UL) & ~15UL))
 
 /* Following ptr */
 #define MEMORY_FOLLOWING( ptr )     ((void *)((ptr) + 1))
@@ -142,6 +186,7 @@ struct ClassBase
 
 /*****************************************************************************/
 
+#ifdef __SASC
 #ifndef PARAMETERS_STACK
 #define PARAMETERS_STACK 1
 #define  CLIB_ALIB_PROTOS_H
@@ -157,6 +202,7 @@ __stdargs ULONG SetSuperAttrs( struct IClass *cl, Object *obj, unsigned long Tag
 #endif /* !PARAMETERS_STACK */
 
 __stdargs void kprintf( STRPTR, ... );
+#endif
 
 /*****************************************************************************/
 
