@@ -11,7 +11,7 @@ DESCFILES 		:= ANIM
 DTFILES		:= $(foreach f, $(DESCFILES), $(DTDIR)/$(f))
 
 #MM- workbench-datatypes-animation : workbench-datatype-anim
-#MM workbench-datatype-anim : includes linklibs workbench-datatype-anim-desc workbench-datatype-anim-testfiles
+#MM workbench-datatype-anim : includes linklibs workbench-datatype-anim-desc
 
 USER_CFLAGS   := -DMYDEBUG
 USER_LDFLAGS := -static
@@ -19,8 +19,6 @@ USER_LDFLAGS := -static
 %build_module mmake=workbench-datatype-anim \
     modname=anim modtype=datatype \
     files=$(FILES)
-
-%copy_files_q mmake=workbench-datatype-anim-testfiles files="chunli.anim7 Mountain.IFF7anim" dst=$(TESTSDIR)
 
 #MM
 workbench-datatype-anim-desc : $(DTFILES)
