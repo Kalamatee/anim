@@ -1035,9 +1035,9 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                       {
                         struct DPAnimChunk *dpan = (struct DPAnimChunk *)(dpanprop -> sp_Data);
                         
-                        if( (dpan -> dpan_FPS) <= 60UL )
+                        if( AROS_BE2LONG(dpan -> dpan_FPS) <= 60UL )
                         {
-                          aid -> aid_FPS = dpan -> dpan_FPS;
+                          aid -> aid_FPS = AROS_BE2LONG(dpan -> dpan_FPS);
 
                           verbose_printf( cb, aid, "DPAN found, FPS set to %lu\n", (aid -> aid_FPS) );
                         }
@@ -1333,7 +1333,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                   /* Store position of DLTA (pos points to the DLTA ID) */
                                   fn -> fn_BMOffset = pos;
                                   fn -> fn_BMSize   = cn -> cn_Size;
-
+                                   
                                   if( (fn -> fn_BitMap) == NULL )
                                   {
                                     /* Preload frames only if requested or if this is the key frame (first frame of anim) */
@@ -1978,7 +1978,7 @@ BOOL CMAP2Object( struct ClassBase *cb, Object *o, UBYTE *rgb, ULONG rgbsize )
                     ADTA_ColorRegisters, (&acm),
                     ADTA_CRegs,          (&acregs),
                     ADTA_NumColors,      (&nc),
-                    TAG_DONE ) == 3UL )
+                    TAG_DONE ) == 3 )
     {
       /* All valid ? */
       if( acm && acregs && nc )
