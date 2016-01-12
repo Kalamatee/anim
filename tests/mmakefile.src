@@ -1,0 +1,11 @@
+#   $Id$
+include $(TOP)/config/make.cfg
+
+TESTFILES := chunli.anim7 Mountain.IFF7anim JUMPGATE.IFFanim 3Globes.anim
+TESTSDIR := $(AROS_TESTS)/datatypes
+
+#MM- workbench-datatype-anim : workbench-datatype-anim-testfiles
+
+%copy_files_q mmake=workbench-datatype-anim-testfiles files="$(TESTFILES)" dst=$(TESTSDIR)
+
+%common
