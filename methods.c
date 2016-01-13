@@ -90,7 +90,7 @@ IPTR DT_NewMethod(struct IClass *cl, Object *o, struct opSet *msg)
     }
 
     /* Create object */
-    if ((retval = DoSuperMethodA( cl, o, msg )) != NULL)
+    if ((retval = DoSuperMethodA( cl, o, msg )) != (IPTR)NULL)
     {
         LONG error;
 
@@ -195,7 +195,7 @@ IPTR DT_SetMethod(struct IClass *cl, Object *o, struct opSet *msg)
             struct RastPort *rp;
 
             /* Get a pointer to the rastport */
-            if( rp = ObtainGIRPort( (((struct opSet *)msg) -> ops_GInfo) ) )
+            if ((rp = ObtainGIRPort( (((struct opSet *)msg) -> ops_GInfo) ) ) != NULL)
             {
                 struct gpRender gpr;
 
@@ -754,7 +754,7 @@ IPTR DT_LoadFrame(struct IClass *cl, Object *o, struct adtFrame *alf)
                 fn -> fn_PostedFree = FALSE;
         }
 
-        retval = ((error)?(0UL):(ULONG)(alf -> alf_BitMap)); /* Result  */
+        retval = ((error)?(0UL):(IPTR)(alf -> alf_BitMap)); /* Result  */
         SetIoErr( error );                                   /* Result2 */
     }
     else
@@ -787,7 +787,6 @@ IPTR DT_LoadFrame(struct IClass *cl, Object *o, struct adtFrame *alf)
 */
 IPTR DT_UnLoadFrame(struct IClass *cl, Object *o, struct adtFrame *alf)
 {
-    struct ClassBase     *cb = (struct ClassBase *)(cl -> cl_UserData);
     struct AnimInstData  *aid = (struct AnimInstData *)INST_DATA( cl, o );
     struct FrameNode *fn;
     IPTR retval = (IPTR)TRUE;
@@ -860,7 +859,7 @@ IPTR DT_UnLoadFrame(struct IClass *cl, Object *o, struct adtFrame *alf)
                 }
 
                 /* Don't process the list twice */
-                if ((fn == ((struct FrameNode *)(alf -> alf_UserData)) ) != NULL)
+                if ((fn == ((struct FrameNode *)(alf -> alf_UserData)) ) != (IPTR)NULL)
                 {
                     i = MIN( 1, i );
 

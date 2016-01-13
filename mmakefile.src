@@ -3,7 +3,6 @@ include $(TOP)/config/make.cfg
 
 FILES := classbase dispatch methods anim
 #FILES stackswap 
-TESTSDIR := $(AROS_TESTS)/datatypes
 
 DTDIR 		:= $(AROS_DEVS)/DataTypes
 DESCFILES 		:= ANIM

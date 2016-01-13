@@ -182,7 +182,7 @@ struct ClassBase
 #define XPTRDATA( x ) ((ULONG)((x)?(*(x)):(0UL)))
 
 /* Boolean conversion */
-#define MAKEBOOL( x ) ((BOOL)((x) != NULL))
+#define MAKEBOOL( x ) ((BOOL)((x) != 0))
 
 /*****************************************************************************/
 

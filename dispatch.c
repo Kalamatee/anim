@@ -48,7 +48,9 @@ LONG ifferr2doserr[] =
 
 /* local prototypes */
 static                 STRPTR               GetPrefsVar( struct ClassBase *, STRPTR );
+#if !defined(__AROS__)
 static                 void                 YouShouldRegister( struct ClassBase *, struct AnimInstData * );
+#endif
 static                 BOOL                 matchstr( struct ClassBase *, STRPTR, STRPTR );
 static                 struct FrameNode    *AllocFrameNode( struct ClassBase *, APTR );
 static                 void                 XCopyMem( struct ClassBase *, APTR, APTR, ULONG );
@@ -365,34 +367,32 @@ void ReadENVPrefs( struct ClassBase *cb, struct AnimInstData *aid )
 {
     struct RDArgs envvarrda =
     {
-      NULL,
-      256L,
-      0L,
-      0L,
-      NULL,
-      0L,
-      NULL,
-      RDAF_NOPROMPT
+        {NULL, 256L, 0L},
+        0L,
+        NULL,
+        0L,
+        NULL,
+        RDAF_NOPROMPT
     };
 
     struct
     {
       STRPTR  matchproject;
-      long   *verbose;
-      long   *modeid;
-      long   *cmaps;
-      long   *nocmaps;
-      long   *dpaintbrushpatch;
-      long   *nodpaintbrushpatch;
-      long   *fps;
-      long   *dynamictiming;
-      long   *nodynamictiming;
+      IPTR  verbose;
+      IPTR  *modeid;
+      IPTR  cmaps;
+      IPTR  nocmaps;
+      IPTR  dpaintbrushpatch;
+      IPTR  nodpaintbrushpatch;
+      IPTR  *fps;
+      IPTR  dynamictiming;
+      IPTR  nodynamictiming;
       STRPTR  sample;
-      long   *samplesperframe;
-      long   *volume;
-      long   *loadall;
-      long   *noloadall;
-      long   *registered;
+      IPTR  *samplesperframe;
+      IPTR  *volume;
+      IPTR  loadall;
+      IPTR  noloadall;
+      IPTR  registered;
     } animargs;
 
     TEXT   varbuff[ 258 ];
@@ -400,7 +400,7 @@ void ReadENVPrefs( struct ClassBase *cb, struct AnimInstData *aid )
 
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
 
-    if( var = GetPrefsVar( cb, "Classes/DataTypes/anim.prefs" ) )
+    if ((var = GetPrefsVar( cb, "Classes/DataTypes/anim.prefs" ) ) != NULL)
     {
       STRPTR prefsline      = var,
              nextprefsline;
@@ -409,7 +409,7 @@ void ReadENVPrefs( struct ClassBase *cb, struct AnimInstData *aid )
       /* Be sure that "var" contains at least one break-char */
       strcat( var, "\n" );
 
-      while( nextprefsline = strpbrk( prefsline, "\n" ) )
+      while ((nextprefsline = strpbrk( prefsline, "\n" ) ) != NULL)
       {
         stccpy( varbuff, prefsline, (int)MIN( (sizeof( varbuff ) - 2UL), (((ULONG)(nextprefsline - prefsline)) + 1UL) ) );
 
@@ -515,7 +515,7 @@ void ReadENVPrefs( struct ClassBase *cb, struct AnimInstData *aid )
                                       SDTA_Period,       (&period),
                                       TAG_DONE ) == 3UL )
                   {
-                    if( aid -> aid_Sample = (STRPTR)AllocPooled( (aid -> aid_Pool), (length + 1UL) ) )
+                    if ((aid -> aid_Sample = (STRPTR)AllocPooled( (aid -> aid_Pool), (length + 1UL) ) ) != NULL)
                     {
                       /* Copy sample and context */
                       XCopyMem( cb, (APTR)sample, (APTR)(aid -> aid_Sample), length );
@@ -548,7 +548,7 @@ void ReadENVPrefs( struct ClassBase *cb, struct AnimInstData *aid )
 
                   if( ioerr >= DTERROR_UNKNOWN_DATATYPE )
                   {
-                    mysprintf( cb, errbuff, GetDTString( ioerr ), (animargs . sample) );
+                    mysprintf( cb, errbuff, (STRPTR)GetDTString( ioerr ), (animargs . sample) );
                   }
                   else
                   {
@@ -614,7 +614,7 @@ void ReadENVPrefs( struct ClassBase *cb, struct AnimInstData *aid )
       FreeVec( var );
     }
 
-#if (0)
+#if !defined(__AROS__)
     /* Notify the user that she/he is using shareware... */
     if( !(aid -> aid_Registered) )
     {
@@ -623,7 +623,7 @@ void ReadENVPrefs( struct ClassBase *cb, struct AnimInstData *aid )
 #endif
 }
 
-
+#if !defined(__AROS__)
 /* The shareware notify requester */
 static
 void YouShouldRegister( struct ClassBase *cb, struct AnimInstData *aid )
@@ -703,7 +703,7 @@ void YouShouldRegister( struct ClassBase *cb, struct AnimInstData *aid )
 
     } while( choices[ (reqresult + xc) % NUMCHOICES ] != result );
 }
-
+#endif
 
 LONG LoadFrames( struct ClassBase *cb, Object *o )
 {
@@ -718,7 +718,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
     NewList( (struct List *)(&(aid -> aid_PostedFreeList)) );
 
     /* Create a memory pool for frame nodes and delta buffers */
-    if( aid -> aid_Pool = CreatePool( MEMF_PUBLIC, 16384UL, 16384UL ) )
+    if ((aid -> aid_Pool = CreatePool( MEMF_PUBLIC, 16384UL, 16384UL ) ) != NULL)
     {
       APTR                 fh;                              /* handle (IFF stream handle)      */
       IPTR                sourcetype;                      /* type of stream (either DTST_FILE or DTST_CLIPBOARD */
@@ -779,7 +779,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
           case DTST_FILE:
           {
               BPTR iff_file_fh;
-              BPTR cloned_fh    = NULL;
+              BPTR cloned_fh    = BNULL;
 
             D(bug("[anim.datatype] %s: DTST_FILE\n", __PRETTY_FUNCTION__));
 
@@ -794,10 +794,10 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
               {
                 BPTR lock;
 
-                if( lock = DupLockFromFH( iff_file_fh ) )
+                if ((lock = DupLockFromFH( iff_file_fh ) ) != BNULL)
                 {
                   /* Set up a filehandle for disk-based loading (random loading) */
-                  if( !(cloned_fh = (IPTR)OpenFromLock( lock )) )
+                  if( !(cloned_fh = (BPTR)OpenFromLock( lock )) )
                   {
                     /* failure */
                     UnLock( lock );
@@ -806,10 +806,10 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
               }
 
               /* OpenFromLock failed ? - Then open by name :-( */
-              if( cloned_fh == NULL )
+              if( cloned_fh == BNULL )
               {
                 /* Set up a filehandle for disk-based loading (random loading) */
-                if (!(cloned_fh = (IPTR)Open( (aid -> aid_ProjectName), MODE_OLDFILE )))
+                if (!(cloned_fh = (BPTR)Open( (aid -> aid_ProjectName), MODE_OLDFILE )))
                 {
                   /* Can't open file */
                   error = IoErr();
@@ -896,7 +896,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                 ULONG             numcmaps   = 0UL; /* number of created cmaps  */
 
                 /* Scan IFF stream until an error or an EOF occurs */
-                for( ;; )
+                while(TRUE)
                 {
                   struct ContextNode *cn;
 
@@ -904,13 +904,18 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
 
                   if ((error = ParseIFF( iff, IFFPARSE_SCAN ) ) != 0)
                   {
-                     D(bug("[anim.datatype] %s: Done? (%d)\n", __PRETTY_FUNCTION__, error));
                     /* EOF (End Of File) is no error here... */
                     if( error == IFFERR_EOF )
                     {
+                        D(bug("[anim.datatype] %s: EOF Reached\n", __PRETTY_FUNCTION__, error));
                       error = 0L;
                     }
-
+                    D(
+                        else
+                        {
+                            bug("[anim.datatype] %s: Error! (%08x)\n", __PRETTY_FUNCTION__, error);
+                        }
+                    )
                     break;
                   }
 
@@ -1341,7 +1346,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                     {
                                       if( animwidth && animheight && animdepth )
                                       {
-                                        if( fn -> fn_BitMap = AllocBitMapPooled( cb, animwidth, animheight, animdepth, (aid -> aid_FramePool) ) )
+                                        if ((fn -> fn_BitMap = AllocBitMapPooled( cb, animwidth, animheight, animdepth, (aid -> aid_FramePool) )) != NULL)
                                         {
                                           UBYTE *buff;
 
