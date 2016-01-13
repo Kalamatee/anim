@@ -1,7 +1,7 @@
 #   $Id$
 include $(TOP)/config/make.cfg
 
-TESTFILES := chunli.anim7 Mountain.IFF7anim JUMPGATE.IFFanim 3Globes.anim
+TESTFILES := chunli.anim7 Mountain.IFF7anim JUMPGATE.IFFanim 3Globes.anim BoingTrek.anim Anti-CBS.anim
 TESTSDIR := $(AROS_TESTS)/datatypes
 
 #MM- workbench-datatype-anim : workbench-datatype-anim-testfiles
