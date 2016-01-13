@@ -2077,6 +2077,7 @@ struct ColorMap *CopyColorMap( struct ClassBase *cb, struct ColorMap *src )
 
 /*****************************************************************************/
 
+#if !defined(__AROS__)
 #define DEBUG_POOLS 1
 
 #ifndef DEBUG_POOLS
@@ -2174,7 +2175,7 @@ void FreePooledVec( struct ClassBase *cb, APTR pool, APTR mem )
     }
 }
 #endif /* DEBUG_POOLS */
-
+#endif
 
 LONG DrawDLTA( struct ClassBase *cb, struct AnimInstData *aid, struct BitMap *prevbm, struct BitMap *bm, struct AnimHeader *ah, UBYTE *dlta, ULONG dltasize )
 {

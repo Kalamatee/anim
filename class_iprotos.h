@@ -25,8 +25,13 @@ void error_printf ( struct ClassBase *cb , struct AnimInstData *gaid , STRPTR fo
 void verbose_printf ( struct ClassBase *cb , struct AnimInstData *gaid , STRPTR format , ...);
 void ReadENVPrefs( struct ClassBase *cb, struct AnimInstData *aid );
 void mysprintf ( struct ClassBase *cb , STRPTR buffer , STRPTR fmt , ...);
+#if !defined(__AROS__)
 APTR AllocPooledVec ( struct ClassBase *cb , APTR pool , ULONG memsize );
 void FreePooledVec ( struct ClassBase *cb , APTR pool , APTR mem );
+#else
+#define AllocPooledVec(cb, pool, size) AllocVecPooled(pool, size)
+#define FreePooledVec(cb, pool, mem) FreeVecPooled(pool, mem)
+#endif
 BOOL CMAP2Object ( struct ClassBase *cb , Object *o , UBYTE *rgb , ULONG rgbsize );
 struct ColorMap *CMAP2ColorMap ( struct ClassBase *cb , struct AnimInstData *aid , UBYTE *rgb , ULONG rgbsize );
 struct ColorMap *CopyColorMap ( struct ClassBase *cb , struct ColorMap *src );
