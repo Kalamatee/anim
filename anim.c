@@ -143,7 +143,7 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
     // needs to be padded to 32 pixels for long data but isn't? The spec doesn't say.
     UBYTE *dlta = (UBYTE *)((IPTR)dltahdr + DLTAHDR_SIZE);
     const ULONG *lists = (const ULONG *)dlta;
-    UWORD numcols = (GetBitMapAttr( bm, BMA_WIDTH) + 15) / 32;
+    UWORD numcols = (GetBitMapAttr( bm, BMA_WIDTH) + 15) >> 5;
     UWORD pitch = bm->BytesPerRow;
     const ULONG xormask = (anhd->ah_Operation & acmpXORILBM) ? 0xFFFF : 0x00;
     ULONG opptr, dataptr;
@@ -155,6 +155,11 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
     UWORD x;
 
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+    
+    if (dltahdr[0]!='D' || dltahdr[1]!='L' ||
+        dltahdr[0]!='T' || dltahdr[1]!='A' )
+        return -7;
+    
     D(bug("[anim.datatype] %s: dltahdr @ 0x%p, dlta @ 0x%p\n", __PRETTY_FUNCTION__, dltahdr, dlta));
     D(bug("[anim.datatype] %s: lists @ 0x%p\n", __PRETTY_FUNCTION__, lists));
     D(bug("[anim.datatype] %s: xormask %04x\n", __PRETTY_FUNCTION__, xormask));
@@ -171,19 +176,15 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
         }
         
         dataptr = AROS_BE2LONG(lists[p + 8]);
-        if ((dataptr == 0) || (dataptr > dltasize))
-        { 
-            // No plane or invalid ptr!!.
-            D(bug("[anim.datatype] %s: missing/invalid data ptr (0x%08x)\n", __PRETTY_FUNCTION__, dataptr));
-            continue;
-        }
-
-        data = (const ULONG *)((const UBYTE *)dlta + dataptr);
-        ops = (const UBYTE *)dlta + opptr;
+        if (dataptr == 0)
+            data = NULL;
+        else
+            data = (const ULONG *)((IPTR)dlta + dataptr);
+        ops = (const UBYTE *)((IPTR)dlta + opptr);
         for (x = 0; x < numcols; ++x)
         {
-            pixels = (ULONG *)bm->Planes[p] + x;
-            stop = (ULONG *)((UBYTE *)pixels + GetBitMapAttr( bm, BMA_HEIGHT) * pitch);
+            pixels = (ULONG *)bm->Planes[p] + (x << 5);
+            stop = (ULONG *)((IPTR)pixels + (GetBitMapAttr( bm, BMA_HEIGHT) * pitch));
             UBYTE opcount = *ops++;
             while (opcount-- > 0)
             {
@@ -195,23 +196,28 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
                     {
                         if (pixels < stop)
                         {
-                            *pixels = AROS_LONG2BE((AROS_BE2LONG(*pixels) & xormask) ^ AROS_BE2LONG(*data));
-                            pixels = (ULONG *)((UBYTE *)pixels + pitch);
+                            *pixels = (*pixels & xormask) ^ *data;
+                            pixels = (ULONG *)((IPTR)pixels + pitch);
                         }
-                        data += sizeof(ULONG);
+                        data++;
                     }
                 }
                 else if (op == 0)
-                { // Same op: copy one byte to several rows
+                { // Same op: copy one entry to several rows
                     UBYTE cnt = *ops++;
-                    ULONG fill = AROS_BE2LONG(*data);
-                    data += sizeof(ULONG);
+                    ULONG fill = 0;
+                    
+                    if (data)
+                    {
+                        fill = *data;
+                        data++;
+                    }
                     while (cnt-- > 0)
                     {
                         if (pixels < stop)
                         {
-                            *pixels = AROS_LONG2BE((AROS_BE2LONG(*pixels) & xormask) ^ fill);
-                            pixels = (ULONG *)((UBYTE *)pixels + pitch);
+                            *pixels = (*pixels & xormask) ^ fill;
+                            pixels = (ULONG *)((IPTR)pixels + pitch);
                         }
                     }
                 }
@@ -265,14 +271,14 @@ LONG unpackanim7worddelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
                             *pixels = (AROS_BE2WORD(*pixels) & xormask) ^ AROS_BE2WORD(*data);
                             pixels += pitch;
                         }
-                        data += sizeof(UWORD);
+                        data++;
                     }
                 }
                 else if (op == 0)
                 { // Same op: copy one byte to several rows
                     UBYTE cnt = *ops++;
                     UWORD fill = AROS_BE2WORD(*data);
-                    data += sizeof(UWORD);
+                    data++;
                     while (cnt-- > 0)
                     {
                         if (pixels < stop)

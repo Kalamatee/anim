@@ -23,6 +23,7 @@ struct FrameNode;
 #if defined(DOASYNCIO)
 #include "asyncio.h"
 #endif
+#include <stdio.h>
 
 /*****************************************************************************/
 
@@ -2448,7 +2449,7 @@ void OpenLogfile( struct ClassBase *cb, struct AnimInstData *aid )
     }
 }
 
-
+#if !defined(__AROS__)
 void mysprintf( struct ClassBase *cb, STRPTR buffer, STRPTR fmt, ... )
 {
     APTR args;
@@ -2457,7 +2458,7 @@ void mysprintf( struct ClassBase *cb, STRPTR buffer, STRPTR fmt, ... )
 
     RawDoFmt( fmt, args, (void (*))"\x16\xc0\x4e\x75", buffer );
 }
-
+#endif
 
 void error_printf( struct ClassBase *cb, struct AnimInstData *aid, STRPTR format, ... )
 {

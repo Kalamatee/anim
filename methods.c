@@ -23,7 +23,7 @@ struct FrameNode;
 /* ansi includes */
 #include <limits.h>
 
-extern LONG *ifferr2doserr;
+extern LONG ifferr2doserr[];
 
 /****** anim.datatype/OM_NEW *************************************************
 *

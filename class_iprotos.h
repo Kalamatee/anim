@@ -6,9 +6,7 @@ DISPATCHERFLAGS struct Library *LibInit ( REGD0 struct ClassBase *cb , REGA0 BPT
 DISPATCHERFLAGS LONG LibOpen ( REGA6 struct ClassBase *cb );
 DISPATCHERFLAGS LONG LibClose ( REGA6 struct ClassBase *cb );
 DISPATCHERFLAGS LONG LibExpunge ( REGA6 struct ClassBase *cb );
-#endif
 
-#if !defined(__AROS__)
 /* stackswap.c */
 DISPATCHERFLAGS ULONG StackSwapDispatch ( REGA0 struct IClass *cl , REGA2 Object *o , REGA1 Msg msg );
 DISPATCHERFLAGS ULONG SwapMe ( REGA0 struct MyStackSwapStruct *mystk );
@@ -24,11 +22,13 @@ void OpenLogfile ( struct ClassBase *cb , struct AnimInstData *gaid );
 void error_printf ( struct ClassBase *cb , struct AnimInstData *gaid , STRPTR format , ...);
 void verbose_printf ( struct ClassBase *cb , struct AnimInstData *gaid , STRPTR format , ...);
 void ReadENVPrefs( struct ClassBase *cb, struct AnimInstData *aid );
-void mysprintf ( struct ClassBase *cb , STRPTR buffer , STRPTR fmt , ...);
 #if !defined(__AROS__)
+void mysprintf ( struct ClassBase *cb , STRPTR buffer , STRPTR fmt , ...);
 APTR AllocPooledVec ( struct ClassBase *cb , APTR pool , ULONG memsize );
 void FreePooledVec ( struct ClassBase *cb , APTR pool , APTR mem );
 #else
+#define mysprintf(cb,buffer,fmt,...) sprintf(buffer,fmt, __VA_ARGS__)
+#define AllocPooledVec(cb, pool, size) AllocVecPooled(pool, size)
 #define AllocPooledVec(cb, pool, size) AllocVecPooled(pool, size)
 #define FreePooledVec(cb, pool, mem) FreeVecPooled(pool, mem)
 #endif
