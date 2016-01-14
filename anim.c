@@ -157,7 +157,7 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
     
     if (dltahdr[0]!='D' || dltahdr[1]!='L' ||
-        dltahdr[0]!='T' || dltahdr[1]!='A' )
+        dltahdr[2]!='T' || dltahdr[3]!='A' )
         return -7;
     
     D(bug("[anim.datatype] %s: dltahdr @ 0x%p, dlta @ 0x%p\n", __PRETTY_FUNCTION__, dltahdr, dlta));
