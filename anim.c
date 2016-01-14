@@ -16,7 +16,7 @@ struct FrameNode;
 #include "classbase.h"
 #include "classdata.h"
 
-#define DLTAHDR_SIZE 6
+#define DLTAHDR_SIZE 8
 
 LONG LoadILBMBody( struct ClassBase *cb, struct BitMap *bm, struct BitMapHeader *bmh, UBYTE *data, ULONG len )
 {
@@ -90,25 +90,27 @@ LONG LoadILBMBody( struct ClassBase *cb, struct BitMap *bm, struct BitMapHeader 
     return 0;
 }
 
+LONG unpackanimidelta(struct AnimHeader *anhd, struct ClassBase *cb, UBYTE *dltahdr, ULONG dltasize, struct BitMap *deltabm, struct BitMap *bm )
+{
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+    return 0;
+}
+
 LONG unpackanimjdelta(struct AnimHeader *anhd, struct ClassBase *cb, UBYTE *dltahdr, ULONG dltasize, struct BitMap *deltabm, struct BitMap *bm )
 {
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
     return 0;
 }
 
+// ANIM 2
 LONG unpacklongdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize )
 {
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
     return 0;
 }
 
+// ANIM 3
 LONG unpackshortdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize )
-{
-    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
-    return 0;
-}
-
-LONG unpackbytedelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize )
 {
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
     return 0;
@@ -128,6 +130,13 @@ LONG unpackanim4worddelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
 }
 
 #endif
+//ANIM 5
+LONG unpackbytedelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize )
+{
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+    return 0;
+}
+
 LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize )
 {
     // ILBMs are only padded to 16 pixel widths, so what happens when the image
