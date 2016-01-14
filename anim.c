@@ -90,17 +90,7 @@ LONG LoadILBMBody( struct ClassBase *cb, struct BitMap *bm, struct BitMapHeader 
     return 0;
 }
 
-LONG unpackanimidelta(struct AnimHeader *anhd, struct ClassBase *cb, UBYTE *dltahdr, ULONG dltasize, struct BitMap *deltabm, struct BitMap *bm )
-{
-    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
-    return 0;
-}
-
-LONG unpackanimjdelta(struct AnimHeader *anhd, struct ClassBase *cb, UBYTE *dltahdr, ULONG dltasize, struct BitMap *deltabm, struct BitMap *bm )
-{
-    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
-    return 0;
-}
+//ANIM-1
 
 // ANIM 2
 LONG unpacklongdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize )
@@ -116,7 +106,7 @@ LONG unpackshortdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr
     return 0;
 }
 
-#if defined(COMMENTED_OUT)
+//ANIM-4
 LONG unpackanim4longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize, ULONG flags )
 {
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
@@ -129,7 +119,6 @@ LONG unpackanim4worddelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
     return 0;
 }
 
-#endif
 //ANIM 5
 LONG unpackbytedelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize )
 {
@@ -137,6 +126,9 @@ LONG unpackbytedelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr,
     return 0;
 }
 
+//ANIM-6
+
+//ANIM-7
 LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize )
 {
     // ILBMs are only padded to 16 pixel widths, so what happens when the image
@@ -145,7 +137,6 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
     const ULONG *lists = (const ULONG *)dlta;
     UWORD numcols = (GetBitMapAttr( bm, BMA_WIDTH) + 15) >> 5;
     UWORD pitch = bm->BytesPerRow;
-    const ULONG xormask = (anhd->ah_Operation & acmpXORILBM) ? 0xFFFF : 0x00;
     ULONG opptr, dataptr;
     const ULONG *data;
     ULONG *pixels;
@@ -162,7 +153,6 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
     
     D(bug("[anim.datatype] %s: dltahdr @ 0x%p, dlta @ 0x%p\n", __PRETTY_FUNCTION__, dltahdr, dlta));
     D(bug("[anim.datatype] %s: lists @ 0x%p\n", __PRETTY_FUNCTION__, lists));
-    D(bug("[anim.datatype] %s: xormask %04x\n", __PRETTY_FUNCTION__, xormask));
 
     for (p = 0; p < bm->Depth; ++p)
     {
@@ -174,7 +164,7 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
             D(bug("[anim.datatype] %s: no ops/invalid op ptr (0x%08x)\n", __PRETTY_FUNCTION__, opptr));
             continue;
         }
-        
+
         dataptr = AROS_BE2LONG(lists[p + 8]);
         if (dataptr == 0)
             data = NULL;
@@ -183,8 +173,8 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
         ops = (const UBYTE *)((IPTR)dlta + opptr);
         for (x = 0; x < numcols; ++x)
         {
-            pixels = (ULONG *)bm->Planes[p] + (x << 5);
-            stop = (ULONG *)((IPTR)pixels + (GetBitMapAttr( bm, BMA_HEIGHT) * pitch));
+            pixels = (ULONG *)((IPTR)bm->Planes[p] + (x << 5));
+            stop = (ULONG *)((IPTR)pixels + (bm->Rows - 1 * pitch));
             UBYTE opcount = *ops++;
             while (opcount-- > 0)
             {
@@ -196,7 +186,7 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
                     {
                         if (pixels < stop)
                         {
-                            *pixels = (*pixels & xormask) ^ *data;
+                            *pixels = (*pixels ^ *data);
                             pixels = (ULONG *)((IPTR)pixels + pitch);
                         }
                         data++;
@@ -206,7 +196,7 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
                 { // Same op: copy one entry to several rows
                     UBYTE cnt = *ops++;
                     ULONG fill = 0;
-                    
+
                     if (data)
                     {
                         fill = *data;
@@ -216,14 +206,14 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
                     {
                         if (pixels < stop)
                         {
-                            *pixels = (*pixels & xormask) ^ fill;
+                            *pixels = (*pixels ^ fill);
                             pixels = (ULONG *)((IPTR)pixels + pitch);
                         }
                     }
                 }
                 else
                 { // Skip op: Skip some rows
-                    pixels = (ULONG *)((UBYTE *)pixels + op * pitch);
+                    pixels = (ULONG *)((IPTR)pixels + (op * pitch));
                 }
             }
         }
@@ -299,6 +289,7 @@ LONG unpackanim7worddelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
     return 0;
 }
 
+//ANIM-8
 static const UWORD *Do8short(UWORD *pixel, UWORD *stop, const UWORD *ops, UWORD xormask, int pitch)
 {
     UWORD opcount = AROS_BE2WORD(*ops++);
@@ -441,5 +432,19 @@ LONG unpackanim8worddelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
         }
     }
 
+    return 0;
+}
+
+//ANIM-I
+LONG unpackanimidelta(struct AnimHeader *anhd, struct ClassBase *cb, UBYTE *dltahdr, ULONG dltasize, struct BitMap *deltabm, struct BitMap *bm )
+{
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+    return 0;
+}
+
+// ANIM-J
+LONG unpackanimjdelta(struct AnimHeader *anhd, struct ClassBase *cb, UBYTE *dltahdr, ULONG dltasize, struct BitMap *deltabm, struct BitMap *bm )
+{
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
     return 0;
 }
