@@ -528,7 +528,7 @@ IPTR DT_LoadFrame(struct IClass *cl, Object *o, struct adtFrame *alf)
     struct FrameNode *fn;
     IPTR retval;
 
-    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+    D(bug("[anim.datatype] %s(%d:%d)\n", __PRETTY_FUNCTION__, alf -> alf_Frame, alf -> alf_TimeStamp));
 
     ObtainSemaphore( (&(aid -> aid_SigSem)) );
 
@@ -547,6 +547,8 @@ IPTR DT_LoadFrame(struct IClass *cl, Object *o, struct adtFrame *alf)
     {
         LONG error = 0L;
 
+        D(bug("[anim.datatype] %s: frame node @ 0x%p\n", __PRETTY_FUNCTION__, fn));
+        
         aid -> aid_CurrFN = fn;
 
         /* Load bitmaps only if we don't cache the whole anim and
@@ -559,154 +561,143 @@ IPTR DT_LoadFrame(struct IClass *cl, Object *o, struct adtFrame *alf)
             {
                 if ((fn -> fn_BitMap = AllocBitMapPooled( cb, (ULONG)(aid -> aid_BMH -> bmh_Width), (ULONG)(aid -> aid_BMH -> bmh_Height), (ULONG)(aid -> aid_BMH -> bmh_Depth), (aid -> aid_FramePool) )) != NULL)
                 {
-                    struct FrameNode *worknode = fn;
-                    ULONG             rollback = 0UL;
+                    struct FrameNode *worknode = fn, *lastnode;
+                    LONG             rollback = 0UL;
                     UBYTE            *buff;
                     ULONG             buffsize;
+                    BOOL                done = FALSE;
 
-                    /* Buffer to fill. Below we try to read some more bytes
-                     * (the size value is stored in worknode -> fn_LoadSize)
-                     * (ANHD chunk (~68 bytes), maybe a CMAP) to save
-                     * the Seek in the next cycle.
-                     * This makes only much sense when doing async io (during playback)...
-                     */
-
-                    /* Not the last frame !
-                     * Note that this code is replicated in the loop below !!
-                     */
-
+                    lastnode = worknode;
                     worknode -> fn_LoadSize = worknode -> fn_BMSize;
-
-                    if( (worknode -> fn_Node . mln_Succ -> mln_Succ) && (aid -> aid_AsyncIO) )
-                    {
-                        ULONG nextpos = ((((struct FrameNode *)(worknode -> fn_Node . mln_Succ)) -> fn_BMOffset) + 8UL);
-
-                        worknode -> fn_LoadSize = MAX( (worknode -> fn_LoadSize), (nextpos - ((worknode -> fn_BMOffset) + 8UL)) );
-
-                        /* Don't alloc a too large buffer... */
-                        worknode -> fn_LoadSize = MIN( (worknode -> fn_LoadSize), ((worknode -> fn_BMSize) * 2UL) );
-                    }
-
                     buffsize = worknode -> fn_LoadSize;
 
-                    do
+                    while((worknode = GetPrevFrameNode(lastnode)) != lastnode)
                     {
-                        worknode = worknode -> fn_PrevFrame;
-                        rollback++;
-
-                        worknode -> fn_LoadSize = worknode -> fn_BMSize;
-
-                        if( (worknode -> fn_Node . mln_Succ -> mln_Succ) && (aid -> aid_AsyncIO) )
+                        if ((worknode ->fn_BitMap) != NULL)
                         {
-                            ULONG nextpos = ((((struct FrameNode *)(worknode -> fn_Node . mln_Succ)) -> fn_BMOffset) + 8UL);
-
-                            worknode -> fn_LoadSize = MAX( (worknode -> fn_LoadSize), (nextpos - ((worknode -> fn_BMOffset) + 8UL)) );
-
-                            /* Don't alloc a too large buffer... */
-                            worknode -> fn_LoadSize = MIN( (worknode -> fn_LoadSize), ((worknode -> fn_BMSize) * 2UL) );
+                            worknode = GetNextFrameNode(worknode);
+                            break;
                         }
+                        if (worknode->fn_TimeStamp != 0)
+                            worknode -> fn_BitMap = AllocBitMapPooled( cb, (ULONG)(aid -> aid_BMH -> bmh_Width), (ULONG)(aid -> aid_BMH -> bmh_Height), (ULONG)(aid -> aid_BMH -> bmh_Depth), (aid -> aid_FramePool));
 
+                        lastnode = worknode;
+                        rollback++;
+                        worknode -> fn_LoadSize = worknode -> fn_BMSize;
                         buffsize = MAX( buffsize, (worknode -> fn_LoadSize) );
-                    } while( ((worknode -> fn_BitMap) == NULL) && ((worknode -> fn_TimeStamp) != 0UL) );
+                    } 
 
-                    if( ((worknode -> fn_BitMap) == NULL) && ((worknode -> fn_TimeStamp) == 0UL) )
+                    D(bug("[anim.datatype] %s: need to load %d previous frames...\n", __PRETTY_FUNCTION__, rollback));
+                    D(bug("[anim.datatype] %s: worknode @ 0x%p\n", __PRETTY_FUNCTION__, worknode));
+
+                    if ((worknode->fn_BitMap == NULL) && (worknode->fn_TimeStamp == 0))
                     {
+                        D(bug("[anim.datatype] %s: clearing frame #%d bitmap..\n", __PRETTY_FUNCTION__, worknode->fn_Frame));
+
                         verbose_printf( cb, aid, "first frame without bitmap ... !\n" );
-                        ClearBitMap( (fn -> fn_BitMap) );
+                        ClearBitMap( (worknode -> fn_BitMap) );
+
+                        if (worknode != fn)
+                        {
+                            worknode = GetNextFrameNode(worknode);
+                            rollback--;
+                        }
+                        else
+                            done = TRUE;
                     }
 
                     /* Alloc buffer for compressed frame (DLTA) data */
-                    if ((buff = (UBYTE *)AllocPooledVec( cb, (aid -> aid_Pool), (buffsize + 32UL) )) != NULL)
+                    if (!(done) && ((buff = (UBYTE *)AllocPooledVec( cb, (aid -> aid_Pool), (buffsize + 32UL) )) != NULL))
                     {
+                        D(bug("[anim.datatype] %s: buffer @ 0x%p (%d + 32 bytes)\n", __PRETTY_FUNCTION__, buff, buffsize));
                         do
                         {
-                            ULONG current = rollback;
+                            LONG seekdist, mode; /* seeking distance (later Seek result, if Seek'ed) */
 
-                            worknode = fn;
+                            lastnode = GetPrevFrameNode(worknode);
 
-                            while( current-- )
+                            if (aid -> aid_CurrFilePos == 0)
                             {
-                                worknode = worknode -> fn_PrevFrame;
-                            }
-
-                            if( (worknode -> fn_BitMap) && (worknode != fn) )
-                            {
-                                CopyBitMap( cb, (worknode -> fn_BitMap), (fn -> fn_BitMap) );
+                                mode = OFFSET_BEGINNING;
+                                seekdist = worknode -> fn_BMOffset;
                             }
                             else
                             {
-                                LONG seekdist; /* seeking distance (later Seek result, if Seek'ed) */
+                                mode = OFFSET_CURRENT;
+                                seekdist = ((worknode -> fn_BMOffset) - (aid -> aid_CurrFilePos));
+                            }
 
-                                seekdist = (((worknode -> fn_BMOffset) + 8UL) - (aid -> aid_CurrFilePos));
+                            D(bug("[anim.datatype] %s: curr pos = %d, bm offset = %d\n", __PRETTY_FUNCTION__, aid -> aid_CurrFilePos, worknode -> fn_BMOffset));
+                            D(bug("[anim.datatype] %s: seekdist = %d\n", __PRETTY_FUNCTION__, seekdist));
 
-                                /* Seek needed ? */
-                                if( seekdist != 0L )
+                            /* Seek needed ? */
+                            if( seekdist != 0L )
+                            {
+#ifdef DOASYNCIO
+                                seekdist = SeekAsync( cb, (aid -> aid_FH), seekdist, mode );
+#else
+                                seekdist = Seek( (aid -> aid_FH), seekdist, mode );
+#endif /* DOASYNCIO */
+                            }
+
+                            /* "Seek" success ? */
+                            if( seekdist != (-1L) )
+                            {
+                                LONG bytesread;
+
+#ifdef DOASYNCIO
+                                bytesread = ReadAsync( cb, (aid -> aid_FH), buff, (worknode -> fn_LoadSize) );
+#else
+                                bytesread = Read( (aid -> aid_FH), buff, (worknode -> fn_LoadSize) );
+#endif /* DOASYNCIO */
+
+                                /* No error during reading ? */
+                                if ((bytesread >= (worknode -> fn_BMSize)) && (bytesread != -1L))
                                 {
-#ifdef DOASYNCIO
-                                    seekdist = SeekAsync( cb, (aid -> aid_FH), seekdist, OFFSET_CURRENT );
-#else
-                                    seekdist = Seek( (aid -> aid_FH), seekdist, OFFSET_CURRENT );
-#endif /* DOASYNCIO */
-                                }
+                                    LONG ifferror;
 
-                                /* "Seek" success ? */
-                                if( seekdist != (-1L) )
-                                {
-                                    LONG bytesread;
-
-#ifdef DOASYNCIO
-                                    bytesread = ReadAsync( cb, (aid -> aid_FH), buff, (worknode -> fn_LoadSize) );
-#else
-                                    bytesread = Read( (aid -> aid_FH), buff, (worknode -> fn_LoadSize) );
-#endif /* DOASYNCIO */
-
-                                    /* No error during reading ? */
-                                    if ((bytesread >= (worknode -> fn_BMSize)) && (bytesread != -1L))
+                                    if ((ifferror = DrawDLTA( cb, aid, (lastnode->fn_BitMap), (worknode->fn_BitMap), (&(worknode -> fn_AH)), buff, (worknode -> fn_BMSize) )) != 0)
                                     {
-                                        LONG ifferror;
+                                        error_printf( cb, aid, "dlta unpacking error %lu\n", ifferror );
 
-                                        if ((ifferror = DrawDLTA( cb, aid, (fn -> fn_BitMap), (fn -> fn_BitMap), (&(worknode -> fn_AH)), buff, (worknode -> fn_BMSize) )) != 0)
-                                        {
-                                            error_printf( cb, aid, "dlta unpacking error %lu\n", ifferror );
-
-                                            /* convert IFFParse error to DOS error */
-                                            error = ifferr2doserr[ (-ifferror - 1) ];
-                                        }
-
-                                        /* Bump file pos */
-                                        aid -> aid_CurrFilePos = ((worknode -> fn_BMOffset) + 8UL) + bytesread;
-                                    }
-                                    else
-                                    {
-                                        /* Read error */
-                                        error = IoErr();
-
-                                        /* Error, rewind stream */
-#ifdef DOASYNCIO
-                                        SeekAsync( cb, (aid -> aid_FH), 0L, OFFSET_BEGINNING );
-#else
-                                        Seek( (aid -> aid_FH), 0L, OFFSET_BEGINNING );
-#endif /* DOASYNCIO */
-                                        aid -> aid_CurrFilePos = 0L;
+                                        /* convert IFFParse error to DOS error */
+                                        error = ifferr2doserr[ (-ifferror - 1) ];
                                     }
 
-                                    worknode -> fn_LoadSize = 0UL; /* destroy that this value won't affect anything else */
+                                    /* Bump file pos */
+                                    aid -> aid_CurrFilePos = worknode -> fn_BMOffset + bytesread;
                                 }
                                 else
                                 {
-                                    /* Seek error */
+                                    /* Read error */
                                     error = IoErr();
+
+                                    /* Error, rewind stream */
+#ifdef DOASYNCIO
+                                    SeekAsync( cb, (aid -> aid_FH), 0L, OFFSET_BEGINNING );
+#else
+                                    Seek( (aid -> aid_FH), 0L, OFFSET_BEGINNING );
+#endif /* DOASYNCIO */
+                                    aid -> aid_CurrFilePos = 0L;
                                 }
+
+                                worknode -> fn_LoadSize = 0UL; /* destroy that this value won't affect anything else */
                             }
-                        } while( rollback-- && (error == 0L) );
+                            else
+                            {
+                                /* Seek error */
+                                error = IoErr();
+                            }
+                            worknode = GetNextFrameNode(worknode);
+                        } while((--rollback > 0) && (error == 0L) );
 
                         FreePooledVec( cb, (aid -> aid_Pool), buff );
                     }
-                    else
-                    {
-                        /* No memory for compressed frame data */
-                        error = ERROR_NO_FREE_STORE;
-                    }
+                    else if (!(done))
+                        {
+                            /* No memory for compressed frame data */
+                            error = ERROR_NO_FREE_STORE;
+                        }
                 }
                 else
                 {
@@ -751,7 +742,7 @@ IPTR DT_LoadFrame(struct IClass *cl, Object *o, struct adtFrame *alf)
         if( fn -> fn_PostedFree )
         {
             Remove( (struct Node *)(&(fn -> fn_PostedFreeNode)) );
-                fn -> fn_PostedFree = FALSE;
+            fn -> fn_PostedFree = FALSE;
         }
 
         retval = ((error)?(0UL):(IPTR)(alf -> alf_BitMap)); /* Result  */

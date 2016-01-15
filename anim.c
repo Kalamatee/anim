@@ -93,34 +93,34 @@ LONG LoadILBMBody( struct ClassBase *cb, struct BitMap *bm, struct BitMapHeader 
 //ANIM-1
 
 // ANIM 2
-LONG unpacklongdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize )
+LONG unpacklongdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, ULONG dltasize )
 {
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
     return 0;
 }
 
 // ANIM 3
-LONG unpackshortdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize )
+LONG unpackshortdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, ULONG dltasize )
 {
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
     return 0;
 }
 
 //ANIM-4
-LONG unpackanim4longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize, ULONG flags )
+LONG unpackanim4longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, ULONG dltasize, ULONG flags )
 {
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
     return 0;
 }
 
-LONG unpackanim4worddelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize, ULONG flags )
+LONG unpackanim4worddelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, ULONG dltasize, ULONG flags )
 {
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
     return 0;
 }
 
 //ANIM 5
-LONG unpackbytedelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize )
+LONG unpackbytedelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, ULONG dltasize )
 {
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
     return 0;
@@ -129,11 +129,10 @@ LONG unpackbytedelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr,
 //ANIM-6
 
 //ANIM-7
-LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize )
+LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, ULONG dltasize )
 {
     // ILBMs are only padded to 16 pixel widths, so what happens when the image
     // needs to be padded to 32 pixels for long data but isn't? The spec doesn't say.
-    UBYTE *dlta = (UBYTE *)((IPTR)dltahdr + DLTAHDR_SIZE);
     const ULONG *lists = (const ULONG *)dlta;
     UWORD numcols = (GetBitMapAttr( bm, BMA_WIDTH) + 15) >> 5;
     UWORD pitch = bm->BytesPerRow;
@@ -146,12 +145,8 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
     UWORD x;
 
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
-    
-    if (dltahdr[0]!='D' || dltahdr[1]!='L' ||
-        dltahdr[2]!='T' || dltahdr[3]!='A' )
-        return -7;
-    
-    D(bug("[anim.datatype] %s: dltahdr @ 0x%p, dlta @ 0x%p\n", __PRETTY_FUNCTION__, dltahdr, dlta));
+
+    D(bug("[anim.datatype] %s: dlta @ 0x%p\n", __PRETTY_FUNCTION__, dlta));
     D(bug("[anim.datatype] %s: lists @ 0x%p\n", __PRETTY_FUNCTION__, lists));
 
     for (p = 0; p < bm->Depth; ++p)
@@ -222,9 +217,8 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
     return 0;
 }
 
-LONG unpackanim7worddelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize )
+LONG unpackanim7worddelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, ULONG dltasize )
 {
-    UBYTE *dlta = (UBYTE *)((IPTR)dltahdr + DLTAHDR_SIZE);
     const ULONG *lists = (const ULONG *)dlta;
     UWORD numcols = (GetBitMapAttr( bm, BMA_WIDTH) + 15) / 16;
     UWORD pitch = bm->BytesPerRow / 2;
@@ -333,9 +327,8 @@ static const UWORD *Do8short(UWORD *pixel, UWORD *stop, const UWORD *ops, UWORD 
     return ops;
 }
 
-LONG unpackanim8longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize )
+LONG unpackanim8longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, ULONG dltasize )
 {
-    UBYTE *dlta = (UBYTE *)((IPTR)dltahdr + DLTAHDR_SIZE);
     const ULONG *planes = (const ULONG *)dlta;
     int numcols = (GetBitMapAttr( bm, BMA_WIDTH) + 31) / 32;
     int pitch = bm->BytesPerRow;
@@ -404,9 +397,8 @@ LONG unpackanim8longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
     return 0;
 }
 
-LONG unpackanim8worddelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dltahdr, ULONG dltasize )
+LONG unpackanim8worddelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, ULONG dltasize )
 {
-    UBYTE *dlta = (UBYTE *)((IPTR)dltahdr + DLTAHDR_SIZE);
     const ULONG *planes = (const ULONG *)dlta;
     int numcols = (GetBitMapAttr( bm, BMA_WIDTH) + 15) / 16;
     int pitch = bm->BytesPerRow / 2;
@@ -436,14 +428,14 @@ LONG unpackanim8worddelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
 }
 
 //ANIM-I
-LONG unpackanimidelta(struct AnimHeader *anhd, struct ClassBase *cb, UBYTE *dltahdr, ULONG dltasize, struct BitMap *deltabm, struct BitMap *bm )
+LONG unpackanimidelta(struct AnimHeader *anhd, struct ClassBase *cb, UBYTE *dlta, ULONG dltasize, struct BitMap *deltabm, struct BitMap *bm )
 {
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
     return 0;
 }
 
 // ANIM-J
-LONG unpackanimjdelta(struct AnimHeader *anhd, struct ClassBase *cb, UBYTE *dltahdr, ULONG dltasize, struct BitMap *deltabm, struct BitMap *bm )
+LONG unpackanimjdelta(struct AnimHeader *anhd, struct ClassBase *cb, UBYTE *dlta, ULONG dltasize, struct BitMap *deltabm, struct BitMap *bm )
 {
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
     return 0;

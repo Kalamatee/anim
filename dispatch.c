@@ -57,7 +57,6 @@ static                 struct FrameNode    *AllocFrameNode( struct ClassBase *, 
 static                 void                 XCopyMem( struct ClassBase *, APTR, APTR, ULONG );
 static                 void                 XORBitMaps( struct BitMap *, struct BitMap * );
 static                 void                 DumpAnimHeader( struct ClassBase *, struct AnimInstData *, ULONG, struct AnimHeader * );
-static                 struct FrameNode    *GetPrevFrameNode( struct FrameNode *, ULONG );
 static                 void                 AttachSample( struct ClassBase *, struct AnimInstData * );
 
 static                 struct IFFHandle    *CreateDOSIFFHandle( struct ClassBase *, BPTR );
@@ -723,7 +722,6 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
     {
       APTR                 fh;                              /* handle (IFF stream handle)      */
       IPTR                sourcetype;                      /* type of stream (either DTST_FILE or DTST_CLIPBOARD */
-      ULONG                pos        = 0UL;                /* current file pos in IFF stream  */
       struct BitMapHeader *bmh;                             /* obj's bitmapheader              */
       ULONG                modeid     = (ULONG)INVALID_ID;  /* anim view mode                  */
       ULONG                animwidth  = 0UL,                /* anim width                      */
@@ -918,20 +916,6 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                         }
                     )
                     break;
-                  }
-
-                  /* Get file position */
-                  if ((cn = CurrentChunk( iff ) ) != NULL)
-                  {
-                    pos = 0UL;
-
-                    D(bug("[anim.datatype] %s: cn @ 0x%p\n", __PRETTY_FUNCTION__, cn));
-
-                    while ((cn = ParentChunk( cn ) ) != NULL)
-                    {
-                        D(bug("[anim.datatype] %s: parent @ 0x%p\n", __PRETTY_FUNCTION__, cn));
-                      pos += cn -> cn_Scan;
-                    }
                   }
 
                   /* bmhd header loaded ? */
@@ -1201,13 +1185,12 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                 /* Create and prepare a new frame node */
                                 if ((fn = AllocFrameNode( cb, (aid -> aid_Pool) ) ) != NULL)
                                 {
-                                    D(bug("[anim.datatype] %s: FrameNode @ 0x%p\n", __PRETTY_FUNCTION__, fn));
-                                  AddTail( (struct List *)(&(aid -> aid_FrameList)), (struct Node *)(&(fn -> fn_Node)) );
+                                    D(bug("[anim.datatype] %s: FrameNode #%d @ 0x%p\n", __PRETTY_FUNCTION__, timestamp, fn));
+                                    AddTail( (struct List *)(&(aid -> aid_FrameList)), (struct Node *)(&(fn -> fn_Node)) );
 
-                                  fn -> fn_TimeStamp = timestamp++;
-                                  fn -> fn_Frame     = fn -> fn_TimeStamp;
-                                  
-                                  fn -> fn_PrevFrame = fn;
+                                    fn -> fn_TimeStamp = timestamp++;
+                                    fn -> fn_Frame     = fn -> fn_TimeStamp;
+                                    fn -> fn_AH . ah_Interleave = 1;
                                 }
                                 else
                                 {
@@ -1222,8 +1205,6 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                 D(bug("[anim.datatype] %s: ID_ANHD\n", __PRETTY_FUNCTION__));
                                 if( fn )
                                 {
-                                  ULONG interleave;
-
                                   /* Read struct AnimHeader */
                                   error = ReadChunkBytes( iff, (&(fn -> fn_AH)), (LONG)sizeof( struct AnimHeader ) );
                                   if( error == (LONG)sizeof( struct AnimHeader ) ) error = 0L;
@@ -1244,18 +1225,11 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                   maxreltime = MAX( maxreltime, (fn -> fn_AH . ah_RelTime) );
                                   minreltime = MIN( minreltime, (fn -> fn_AH . ah_RelTime) );
 
-                                  interleave = (ULONG)(fn -> fn_AH . ah_Interleave);
-
                                   /* An interleave of 0 means two frames back */
-                                  if( interleave == 0 )
-                                  {
-                                    interleave = 2;
-                                  }
+                                  if (fn -> fn_AH . ah_Interleave == 0)
+                                    fn -> fn_AH . ah_Interleave = 2;
 
-                                  D(bug("[anim.datatype] %s: interleave = %d\n", __PRETTY_FUNCTION__, interleave));
-                                  /* Get previous frame */
-                                  fn -> fn_PrevFrame = GetPrevFrameNode( fn, interleave );
-                                  D(bug("[anim.datatype] %s: PrevFrame @ 0x%p\n", __PRETTY_FUNCTION__, fn -> fn_PrevFrame));
+                                  D(bug("[anim.datatype] %s: interleave = %d\n", __PRETTY_FUNCTION__, fn -> fn_AH . ah_Interleave));
                                 }
                             }
                                 break;
@@ -1337,7 +1311,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                 if( fn )
                                 {
                                   /* Store position of DLTA (pos points to the DLTA ID) */
-                                  fn -> fn_BMOffset = pos;
+                                  fn -> fn_BMOffset = Seek((BPTR)iff->iff_Stream, 0, OFFSET_CURRENT);
                                   fn -> fn_BMSize   = cn -> cn_Size;
                                    
                                   if( (fn -> fn_BitMap) == NULL )
@@ -1360,7 +1334,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                             memset( (void *)buff, 0, (size_t)((cn -> cn_Size) + 31UL) );
 
                                             /* Get previous frame */
-                                            prevfn = fn -> fn_PrevFrame;
+                                            prevfn = GetPrevFrameNode(fn);
 
                                             /* Load delta data */
                                             error = ReadChunkBytes( iff, buff, (cn -> cn_Size) );
@@ -2404,9 +2378,9 @@ void DumpAnimHeader( struct ClassBase *cb, struct AnimInstData *aid, ULONG ti, s
 }
 
 
-static
-struct FrameNode *GetPrevFrameNode( struct FrameNode *currfn, ULONG interleave )
+struct FrameNode *GetPrevFrameNode( struct FrameNode *currfn)
 {
+    ULONG interleave = (ULONG)currfn->fn_AH.ah_Interleave;
     struct FrameNode *worknode,
                      *prevnode;
 
@@ -2417,12 +2391,37 @@ struct FrameNode *GetPrevFrameNode( struct FrameNode *currfn, ULONG interleave )
 
     while ((prevnode = (struct FrameNode *)(worknode -> fn_Node . mln_Pred) ) != NULL)
     {
-      if( (interleave-- == 0U) || ((prevnode -> fn_Node . mln_Pred) == NULL) )
+      if( (--interleave == 0) || ((prevnode -> fn_Node . mln_Pred) == NULL) )
       {
         break;
       }
 
       worknode = prevnode;
+    }
+
+    return( worknode );
+}
+
+
+struct FrameNode *GetNextFrameNode( struct FrameNode *currfn)
+{
+    ULONG interleave = (ULONG)currfn->fn_AH.ah_Interleave;
+    struct FrameNode *worknode,
+                     *nxtnode;
+
+    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
+    /* Get next frame */
+    worknode = currfn;
+
+    while ((nxtnode = (struct FrameNode *)(worknode -> fn_Node . mln_Succ) ) != NULL)
+    {
+      if( (--interleave == 0) || ((nxtnode -> fn_Node . mln_Succ) == NULL) )
+      {
+        break;
+      }
+
+      worknode = nxtnode;
     }
 
     return( worknode );
