@@ -122,7 +122,75 @@ LONG unpackanim4worddelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
 //ANIM 5
 LONG unpackbytedelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, ULONG dltasize )
 {
+    const ULONG *lists = (const ULONG *)dlta;
+    UWORD numcols = bm->BytesPerRow;
+    UBYTE opptr;
+    UBYTE mask = 0;
+    UBYTE *pixels;
+    UBYTE *stop;
+    const UBYTE *ops;
+    UBYTE p;
+    UWORD x;
+
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
+
+    D(bug("[anim.datatype] %s: dlta @ 0x%p\n", __PRETTY_FUNCTION__, dlta));
+    D(bug("[anim.datatype] %s: lists @ 0x%p\n", __PRETTY_FUNCTION__, lists));
+
+    for (p = 0; p < bm->Depth; p++)
+    {
+        opptr = AROS_BE2LONG(lists[p]);
+        D(bug("[anim.datatype] %s:   plane #%d @ 0x%p\n", __PRETTY_FUNCTION__, p, bm->Planes[p]));
+        if ((opptr == 0) || (opptr > dltasize))
+        {
+            // No ops for this plane or invalid pointer.
+            D(bug("[anim.datatype] %s: no ops/invalid op ptr (0x%08x)\n", __PRETTY_FUNCTION__, opptr));
+            continue;
+        }
+        ops = (const UBYTE *)((IPTR)dlta + opptr);
+        for (x = 0; x < numcols; x++)
+        {
+            pixels = (UBYTE *)((IPTR)bm->Planes[p] + x);
+            stop = (UBYTE *)((IPTR)pixels + ((bm->Rows - 1) * numcols));
+            BYTE opcount = *ops++;
+            while (opcount-- > 0)
+            {
+                UBYTE op = *ops++;
+                if (op & 0x80)
+                { // Uniq op: copy data literally
+                    UBYTE cnt = op & 0x7F;
+                    while (cnt-- > 0)
+                    {
+                        if (pixels <= stop)
+                        {
+                            *pixels = ((*pixels & mask) ^ *ops);
+                            pixels = (UBYTE *)((IPTR)pixels + numcols);
+                        }
+                        ops++;
+                    }
+                }
+                else if (op == 0)
+                { // Same op: copy one entry to several rows
+                    UBYTE cnt = *ops++;
+                    UBYTE fill = *ops++;
+
+                    while (cnt-- > 0)
+                    {
+                        if (pixels <= stop)
+                        {
+                            *pixels = ((*pixels & mask) ^ fill);
+                            pixels = (UBYTE *)((IPTR)pixels + numcols);
+                        }
+                    }
+                }
+                else
+                { // Skip op: Skip some rows
+                    pixels = (UBYTE *)((IPTR)pixels + (op * numcols));
+                }
+            }
+        }
+    }
+
     return 0;
 }
 
@@ -131,13 +199,12 @@ LONG unpackbytedelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, UL
 //ANIM-7
 LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, ULONG dltasize )
 {
-    // ILBMs are only padded to 16 pixel widths, so what happens when the image
-    // needs to be padded to 32 pixels for long data but isn't? The spec doesn't say.
     const ULONG *lists = (const ULONG *)dlta;
     UWORD numcols = (bm->BytesPerRow >> 2);
     UWORD pitch = bm->BytesPerRow;
     ULONG opptr, dataptr;
     const ULONG *data;
+    ULONG mask = 0;
     ULONG *pixels;
     ULONG *stop;
     const UBYTE *ops;
@@ -175,39 +242,37 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
             {
                 UBYTE op = *ops++;
                 if (op & 0x80)
-                { // Uniq op: copy data literally
+                {
+                    // Uniq op: copy data literally
                     UBYTE cnt = op & 0x7F;
                     while (cnt-- > 0)
                     {
                         if (pixels <= stop)
                         {
-                            *pixels = (*pixels ^ *data);
+                            *pixels = ((*pixels & mask) ^ *data);
                             pixels = (ULONG *)((IPTR)pixels + pitch);
                         }
                         data++;
                     }
                 }
                 else if (op == 0)
-                { // Same op: copy one entry to several rows
+                {
+                    // Same op: copy one entry to several rows
                     UBYTE cnt = *ops++;
-                    ULONG fill = 0;
-
-                    if (data)
-                    {
-                        fill = *data;
-                        data++;
-                    }
+                    ULONG fill = *data;
+                    data++;
                     while (cnt-- > 0)
                     {
                         if (pixels <= stop)
                         {
-                            *pixels = (*pixels ^ fill);
+                            *pixels = ((*pixels & mask) ^ fill);
                             pixels = (ULONG *)((IPTR)pixels + pitch);
                         }
                     }
                 }
                 else
-                { // Skip op: Skip some rows
+                {
+                    // Skip op: Skip some rows
                     pixels = (ULONG *)((IPTR)pixels + (op * pitch));
                 }
             }
@@ -220,11 +285,14 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
 LONG unpackanim7worddelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, ULONG dltasize )
 {
     const ULONG *lists = (const ULONG *)dlta;
-    UWORD numcols = (GetBitMapAttr( bm, BMA_WIDTH) + 15) / 16;
-    UWORD pitch = bm->BytesPerRow / 2;
-    const UWORD xormask = (anhd->ah_Operation & acmpXORILBM) ? 0xFFFF : 0x00;
-    UWORD x;
+    UWORD numcols = bm->BytesPerRow >> 1;
+    UWORD pitch = bm->BytesPerRow;
+    ULONG mask = 0;
+    UWORD *pixels;
+    UWORD *stop;
+    const UBYTE *ops;
     UBYTE p;
+    UWORD x;
 
     D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
 
@@ -239,42 +307,45 @@ LONG unpackanim7worddelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
         const UBYTE *ops = (const UBYTE *)dlta + opptr;
         for (x = 0; x < numcols; ++x)
         {
-            UWORD *pixels = (UWORD *)bm->Planes[p] + x;
-            UWORD *stop = pixels + GetBitMapAttr( bm, BMA_HEIGHT) * pitch;
+            pixels = (UWORD *)((IPTR)bm->Planes[p] + (x << 1));
+            stop = (UWORD *)((IPTR)pixels + ((bm->Rows - 1) * pitch));
             UBYTE opcount = *ops++;
             while (opcount-- > 0)
             {
                 UBYTE op = *ops++;
                 if (op & 0x80)
-                { // Uniq op: copy data literally
+                {
+                    // Uniq op: copy data literally
                     UBYTE cnt = op & 0x7F;
                     while (cnt-- > 0)
                     {
                         if (pixels < stop)
                         {
-                            *pixels = (AROS_BE2WORD(*pixels) & xormask) ^ AROS_BE2WORD(*data);
-                            pixels += pitch;
+                            *pixels = (*pixels & mask) ^ *data;
+                            pixels = (UWORD *)((IPTR)pixels + pitch);
                         }
                         data++;
                     }
                 }
                 else if (op == 0)
-                { // Same op: copy one byte to several rows
+                {
+                    // Same op: copy one byte to several rows
                     UBYTE cnt = *ops++;
-                    UWORD fill = AROS_BE2WORD(*data);
+                    UWORD fill = *data;
                     data++;
                     while (cnt-- > 0)
                     {
                         if (pixels < stop)
                         {
-                            *pixels = (AROS_BE2WORD(*pixels) & xormask) ^ fill;
-                            pixels += pitch;
+                            *pixels = (*pixels & mask) ^ fill;
+                            pixels = (UWORD *)((IPTR)pixels + pitch);
                         }
                     }
                 }
                 else
-                { // Skip op: Skip some rows
-                    pixels += op * pitch;
+                {
+                    // Skip op: Skip some rows
+                    pixels = (UWORD *)((IPTR)pixels + (op * pitch));
                 }
             }
         }
