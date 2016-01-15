@@ -134,7 +134,7 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
     // ILBMs are only padded to 16 pixel widths, so what happens when the image
     // needs to be padded to 32 pixels for long data but isn't? The spec doesn't say.
     const ULONG *lists = (const ULONG *)dlta;
-    UWORD numcols = (GetBitMapAttr( bm, BMA_WIDTH) + 15) >> 5;
+    UWORD numcols = (bm->BytesPerRow >> 2);
     UWORD pitch = bm->BytesPerRow;
     ULONG opptr, dataptr;
     const ULONG *data;
@@ -149,7 +149,7 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
     D(bug("[anim.datatype] %s: dlta @ 0x%p\n", __PRETTY_FUNCTION__, dlta));
     D(bug("[anim.datatype] %s: lists @ 0x%p\n", __PRETTY_FUNCTION__, lists));
 
-    for (p = 0; p < bm->Depth; ++p)
+    for (p = 0; p < bm->Depth; p++)
     {
         opptr = AROS_BE2LONG(lists[p]);
         D(bug("[anim.datatype] %s:   plane #%d @ 0x%p\n", __PRETTY_FUNCTION__, p, bm->Planes[p]));
@@ -166,10 +166,10 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
         else
             data = (const ULONG *)((IPTR)dlta + dataptr);
         ops = (const UBYTE *)((IPTR)dlta + opptr);
-        for (x = 0; x < numcols; ++x)
+        for (x = 0; x < numcols; x++)
         {
-            pixels = (ULONG *)((IPTR)bm->Planes[p] + (x << 5));
-            stop = (ULONG *)((IPTR)pixels + (bm->Rows - 1 * pitch));
+            pixels = (ULONG *)((IPTR)bm->Planes[p] + (x << 2));
+            stop = (ULONG *)((IPTR)pixels + ((bm->Rows - 1) * pitch));
             UBYTE opcount = *ops++;
             while (opcount-- > 0)
             {
@@ -179,7 +179,7 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
                     UBYTE cnt = op & 0x7F;
                     while (cnt-- > 0)
                     {
-                        if (pixels < stop)
+                        if (pixels <= stop)
                         {
                             *pixels = (*pixels ^ *data);
                             pixels = (ULONG *)((IPTR)pixels + pitch);
@@ -199,7 +199,7 @@ LONG unpackanim7longdelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlt
                     }
                     while (cnt-- > 0)
                     {
-                        if (pixels < stop)
+                        if (pixels <= stop)
                         {
                             *pixels = (*pixels ^ fill);
                             pixels = (ULONG *)((IPTR)pixels + pitch);
