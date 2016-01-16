@@ -12,7 +12,7 @@ DTFILES		:= $(foreach f, $(DESCFILES), $(DTDIR)/$(f))
 #MM- workbench-datatypes-animation : workbench-datatype-anim
 #MM workbench-datatype-anim : includes linklibs workbench-datatype-anim-desc
 
-USER_CFLAGS   := -DMYDEBUG
+USER_CFLAGS   := -DDEBUG=0
 USER_LDFLAGS := -static
 
 %build_module mmake=workbench-datatype-anim \

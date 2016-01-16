@@ -6,7 +6,9 @@
 **
 */
 
-#define DEBUG 1
+#ifndef DEBUG
+#   define DEBUG 0
+#endif
 #include <aros/debug.h>
 
 struct AnimInstData;
@@ -151,7 +153,7 @@ LONG unpackbytedelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, UL
         for (x = 0; x < numcols; x++)
         {
             pixels = (UBYTE *)((IPTR)bm->Planes[p] + x);
-            stop = (UBYTE *)((IPTR)pixels + ((bm->Rows - 1) * numcols));
+            stop = (UBYTE *)((IPTR)pixels + ((bm->Rows - 1) * bm->BytesPerRow));
             BYTE opcount = *ops++;
             while (opcount-- > 0)
             {
@@ -164,7 +166,7 @@ LONG unpackbytedelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, UL
                         if (pixels <= stop)
                         {
                             *pixels = ((*pixels & mask) ^ *ops);
-                            pixels = (UBYTE *)((IPTR)pixels + numcols);
+                            pixels = (UBYTE *)((IPTR)pixels + bm->BytesPerRow);
                         }
                         ops++;
                     }
@@ -179,13 +181,13 @@ LONG unpackbytedelta(struct AnimHeader *anhd, struct BitMap *bm, UBYTE *dlta, UL
                         if (pixels <= stop)
                         {
                             *pixels = ((*pixels & mask) ^ fill);
-                            pixels = (UBYTE *)((IPTR)pixels + numcols);
+                            pixels = (UBYTE *)((IPTR)pixels + bm->BytesPerRow);
                         }
                     }
                 }
                 else
                 { // Skip op: Skip some rows
-                    pixels = (UBYTE *)((IPTR)pixels + (op * numcols));
+                    pixels = (UBYTE *)((IPTR)pixels + (op * bm->BytesPerRow));
                 }
             }
         }

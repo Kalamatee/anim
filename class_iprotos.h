@@ -44,8 +44,6 @@ void ClearBitMap( struct BitMap *bm );
 LONG DrawDLTA( struct ClassBase *cb, struct AnimInstData *aid, struct BitMap *prevbm, struct BitMap *bm, struct AnimHeader *ah, UBYTE *dlta, ULONG dltasize );
 BOOL FreeAbleFrame( struct AnimInstData *, struct FrameNode * );
 struct FrameNode *FindFrameNode( struct MinList *, ULONG );
-struct FrameNode *GetPrevFrameNode( struct FrameNode *);
-struct FrameNode *GetNextFrameNode( struct FrameNode *);
 ULONG SaveIFFAnim( struct ClassBase *cb, struct IClass *cl, Object *o, struct dtWrite *dtw );
 void FreeFrameNodeResources( struct ClassBase *cb, struct MinList *fnl );
 LONG LoadFrames( struct ClassBase *cb, Object *o );

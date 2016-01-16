@@ -130,6 +130,8 @@ struct FrameNode
 /* Get beginning of struct FrameNode from fn_PostedFreeNode */
 #define POSTEDFREENODE2FN( pfn ) ((struct FrameNode *)(((struct MinNode *)(pfn)) - 1))
 
+    struct FrameNode  *fn_PrevFrame;
+
 /* Misc */
     UWORD              fn_PostedFree;
     WORD               fn_UseCount;       /* In-Use counter */

@@ -11,7 +11,9 @@
 **
 */
 
-#define DEBUG 1
+#ifndef DEBUG
+#   define DEBUG 0
+#endif
 #include <aros/debug.h>
 
 struct AnimInstData;
@@ -57,6 +59,7 @@ static                 struct FrameNode    *AllocFrameNode( struct ClassBase *, 
 static                 void                 XCopyMem( struct ClassBase *, APTR, APTR, ULONG );
 static                 void                 XORBitMaps( struct BitMap *, struct BitMap * );
 static                 void                 DumpAnimHeader( struct ClassBase *, struct AnimInstData *, ULONG, struct AnimHeader * );
+static                 struct FrameNode    *GetPrevFrameNode( struct FrameNode *, ULONG );
 static                 void                 AttachSample( struct ClassBase *, struct AnimInstData * );
 
 static                 struct IFFHandle    *CreateDOSIFFHandle( struct ClassBase *, BPTR );
@@ -1190,7 +1193,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
 
                                     fn -> fn_TimeStamp = timestamp++;
                                     fn -> fn_Frame     = fn -> fn_TimeStamp;
-                                    fn -> fn_AH . ah_Interleave = 1;
+                                    fn -> fn_PrevFrame = fn;
                                 }
                                 else
                                 {
@@ -1205,6 +1208,8 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                 D(bug("[anim.datatype] %s: ID_ANHD\n", __PRETTY_FUNCTION__));
                                 if( fn )
                                 {
+                                  ULONG interleave;
+
                                   /* Read struct AnimHeader */
                                   error = ReadChunkBytes( iff, (&(fn -> fn_AH)), (LONG)sizeof( struct AnimHeader ) );
                                   if( error == (LONG)sizeof( struct AnimHeader ) ) error = 0L;
@@ -1225,11 +1230,18 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                   maxreltime = MAX( maxreltime, (fn -> fn_AH . ah_RelTime) );
                                   minreltime = MIN( minreltime, (fn -> fn_AH . ah_RelTime) );
 
-                                  /* An interleave of 0 means two frames back */
-                                  if (fn -> fn_AH . ah_Interleave == 0)
-                                    fn -> fn_AH . ah_Interleave = 2;
+                                  interleave = (ULONG)(fn -> fn_AH . ah_Interleave);
 
-                                  D(bug("[anim.datatype] %s: interleave = %d\n", __PRETTY_FUNCTION__, fn -> fn_AH . ah_Interleave));
+                                  /* An interleave of 0 means two frames back */
+                                  if( interleave == 0 )
+                                  {
+                                    interleave = 2;
+                                  }
+
+                                  D(bug("[anim.datatype] %s: interleave = %d\n", __PRETTY_FUNCTION__, interleave));
+                                  /* Get previous frame */
+                                  fn -> fn_PrevFrame = GetPrevFrameNode( fn, interleave );
+                                  D(bug("[anim.datatype] %s: PrevFrame @ 0x%p\n", __PRETTY_FUNCTION__, fn -> fn_PrevFrame));
                                 }
                             }
                                 break;
@@ -1325,16 +1337,20 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                         {
                                           UBYTE *buff;
 
+                                            D(bug("[anim.datatype] %s: bitmap @ 0x%p\n", __PRETTY_FUNCTION__, fn -> fn_BitMap));
                                           /* Allocate buffer */
                                           if ((buff = (UBYTE *)AllocPooledVec( cb, (aid -> aid_Pool), ((cn -> cn_Size) + 32UL) ) ) != NULL)
                                           {
                                             struct FrameNode *prevfn;
 
+                                              D(bug("[anim.datatype] %s: buffer @ 0x%p\n", __PRETTY_FUNCTION__, buff));
+
                                             /* Clear buffer to get rid of some problems with corrupted DLTAs */
                                             memset( (void *)buff, 0, (size_t)((cn -> cn_Size) + 31UL) );
 
                                             /* Get previous frame */
-                                            prevfn = GetPrevFrameNode(fn);
+                                            prevfn = fn -> fn_PrevFrame;
+                                            D(bug("[anim.datatype] %s: prevfn @ 0x%p, prev->bm @ 0x%p\n", __PRETTY_FUNCTION__, prevfn, prevfn -> fn_BitMap));
 
                                             /* Load delta data */
                                             error = ReadChunkBytes( iff, buff, (cn -> cn_Size) );
@@ -2378,9 +2394,9 @@ void DumpAnimHeader( struct ClassBase *cb, struct AnimInstData *aid, ULONG ti, s
 }
 
 
-struct FrameNode *GetPrevFrameNode( struct FrameNode *currfn)
+static
+struct FrameNode *GetPrevFrameNode( struct FrameNode *currfn, ULONG interleave )
 {
-    ULONG interleave = (ULONG)currfn->fn_AH.ah_Interleave;
     struct FrameNode *worknode,
                      *prevnode;
 
@@ -2391,7 +2407,7 @@ struct FrameNode *GetPrevFrameNode( struct FrameNode *currfn)
 
     while ((prevnode = (struct FrameNode *)(worknode -> fn_Node . mln_Pred) ) != NULL)
     {
-      if( (--interleave == 0) || ((prevnode -> fn_Node . mln_Pred) == NULL) )
+      if( (interleave-- == 0U) || ((prevnode -> fn_Node . mln_Pred) == NULL) )
       {
         break;
       }
@@ -2401,32 +2417,6 @@ struct FrameNode *GetPrevFrameNode( struct FrameNode *currfn)
 
     return( worknode );
 }
-
-
-struct FrameNode *GetNextFrameNode( struct FrameNode *currfn)
-{
-    ULONG interleave = (ULONG)currfn->fn_AH.ah_Interleave;
-    struct FrameNode *worknode,
-                     *nxtnode;
-
-    D(bug("[anim.datatype] %s()\n", __PRETTY_FUNCTION__));
-
-    /* Get next frame */
-    worknode = currfn;
-
-    while ((nxtnode = (struct FrameNode *)(worknode -> fn_Node . mln_Succ) ) != NULL)
-    {
-      if( (--interleave == 0) || ((nxtnode -> fn_Node . mln_Succ) == NULL) )
-      {
-        break;
-      }
-
-      worknode = nxtnode;
-    }
-
-    return( worknode );
-}
-
 
 void OpenLogfile( struct ClassBase *cb, struct AnimInstData *aid )
 {
@@ -2460,20 +2450,28 @@ void mysprintf( struct ClassBase *cb, STRPTR buffer, STRPTR fmt, ... )
 
 void error_printf( struct ClassBase *cb, struct AnimInstData *aid, STRPTR format, ... )
 {
+    va_list args;
+
     OpenLogfile( cb, aid );
 
     if( aid -> aid_VerboseOutput )
     {
-      VFPrintf( (aid -> aid_VerboseOutput), format, (APTR)((&format) + 1) );
+        va_start (args, format);
+        VFPrintf( (aid -> aid_VerboseOutput), format, args);
+        va_end (args);
     }
 }
 
 
 void verbose_printf( struct ClassBase *cb, struct AnimInstData *aid, STRPTR format, ... )
 {
+    va_list args;
+
     if( aid -> aid_VerboseOutput )
     {
-      VFPrintf( (aid -> aid_VerboseOutput), format, (APTR)((&format) + 1) );
+        va_start (args, format);
+        VFPrintf( (aid -> aid_VerboseOutput), format, args);
+        va_end (args);
     }
 }
 #endif
