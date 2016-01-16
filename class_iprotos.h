@@ -18,15 +18,18 @@ DISPATCHERFLAGS ULONG MyDispatch ( REGA0 struct MyStackSwapStruct *mystk );
 struct IClass *initClass ( struct ClassBase *cb );
 DISPATCHERFLAGS ULONG Dispatch ( REGA0 struct IClass *cl , REGA2 Object *o , REGA1 Msg msg );
 #endif
+void ReadENVPrefs( struct ClassBase *cb, struct AnimInstData *aid );
 void OpenLogfile ( struct ClassBase *cb , struct AnimInstData *gaid );
+
+#if !defined(__AROS__)
 void error_printf ( struct ClassBase *cb , struct AnimInstData *gaid , STRPTR format , ...);
 void verbose_printf ( struct ClassBase *cb , struct AnimInstData *gaid , STRPTR format , ...);
-void ReadENVPrefs( struct ClassBase *cb, struct AnimInstData *aid );
-#if !defined(__AROS__)
 void mysprintf ( struct ClassBase *cb , STRPTR buffer , STRPTR fmt , ...);
 APTR AllocPooledVec ( struct ClassBase *cb , APTR pool , ULONG memsize );
 void FreePooledVec ( struct ClassBase *cb , APTR pool , APTR mem );
 #else
+#define error_printf(cb, gaid, format, ...)
+#define verbose_printf(cb , gaid, format, ...)
 #define mysprintf(cb,buffer,fmt,...) sprintf(buffer,fmt, __VA_ARGS__)
 #define AllocPooledVec(cb, pool, size) AllocVecPooled(pool, size)
 #define AllocPooledVec(cb, pool, size) AllocVecPooled(pool, size)

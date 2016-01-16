@@ -2457,7 +2457,6 @@ void mysprintf( struct ClassBase *cb, STRPTR buffer, STRPTR fmt, ... )
 
     RawDoFmt( fmt, args, (void (*))"\x16\xc0\x4e\x75", buffer );
 }
-#endif
 
 void error_printf( struct ClassBase *cb, struct AnimInstData *aid, STRPTR format, ... )
 {
@@ -2477,7 +2476,7 @@ void verbose_printf( struct ClassBase *cb, struct AnimInstData *aid, STRPTR form
       VFPrintf( (aid -> aid_VerboseOutput), format, (APTR)((&format) + 1) );
     }
 }
-
+#endif
 
 static
 void AttachSample( struct ClassBase *cb, struct AnimInstData *aid )
