@@ -28,7 +28,7 @@ void mysprintf ( struct ClassBase *cb , STRPTR buffer , STRPTR fmt , ...);
 APTR AllocPooledVec ( struct ClassBase *cb , APTR pool , ULONG memsize );
 void FreePooledVec ( struct ClassBase *cb , APTR pool , APTR mem );
 #else
-#define error_printf(cb, gaid, format, ...)
+#define error_printf(cb, gaid, format, ...) bug(format, __VA_ARGS__)
 #define verbose_printf(cb , gaid, format, ...)
 #define mysprintf(cb,buffer,fmt,...) sprintf(buffer,fmt, __VA_ARGS__)
 #define AllocPooledVec(cb, pool, size) AllocVecPooled(pool, size)

@@ -1389,7 +1389,7 @@ LONG LoadFrames( struct ClassBase *cb, Object *o )
                                   }
                                   else
                                   {
-                                    error_printf( cb, aid, "scan/load: bitmap already loaded\n" );
+                                    error_printf( cb, aid, "scan/load: bitmap already loaded @ 0x%p\n", fn->fn_BitMap);
                                   }
                                 }
                             }
@@ -2197,7 +2197,7 @@ LONG DrawDLTA( struct ClassBase *cb, struct AnimInstData *aid, struct BitMap *pr
 
         case acmpXORILBM: /*  1  */
         {
-            error_printf( cb, aid, "\adlta: acmpXORILBM disabled, call author immediately\n" );
+            error_printf( cb, aid, "\adlta: acmpXORILBM (ANIM-%d) disabled, call author immediately\n", ah->ah_Operation);
             return( ERROR_NOT_IMPLEMENTED );
         }
 
@@ -2284,7 +2284,7 @@ LONG DrawDLTA( struct ClassBase *cb, struct AnimInstData *aid, struct BitMap *pr
 #else
             error_printf( cb, aid, "\adlta: acmpDelta disabled, call author (gisburn@w-specht.rhein-ruhr.de)\n"
                                    "immediately. If you are this FIRST user who send me a VALID IFF ANIM-4 compressed animation\n"
-                                   "you'll get $10 US-Dollar !!\n THIS IS NO JOKE !!\n" );
+                                   "you'll get $%d US-Dollar !!\n THIS IS NO JOKE !!\n", 10);
             error = ERROR_NOT_IMPLEMENTED;
 #endif /* COMMENTED_OUT */
         }
@@ -2665,7 +2665,7 @@ ULONG SaveIFFAnim( struct ClassBase *cb, struct IClass *cl, Object *o, struct dt
                         }
                         else
                         {
-                          error_printf( cb, aid, "can't alloc dynamic palette buffer\n" );
+                          error_printf( cb, aid, "can't alloc dynamic palette buffer for %d colors\n", numcolors);
                           error = ERROR_NO_FREE_STORE;
                         }
                       }
@@ -2674,7 +2674,7 @@ ULONG SaveIFFAnim( struct ClassBase *cb, struct IClass *cl, Object *o, struct dt
                       {
                         if ((error = WriteIFFAnim3( cb, iff, ac, ((timestamp * 60UL) / fps), (60UL / fps), (&xbmh), cmap_cregs, numcolors, (alf . alf_BitMap) ) ) != 0)
                         {
-                          error_printf( cb, aid, "error while writing IFF ANIM-3, aborted\n" );
+                          error_printf( cb, aid, "error %08x while writing IFF ANIM-3, aborted\n", error);
                         }
                       }
 
@@ -2721,7 +2721,7 @@ ULONG SaveIFFAnim( struct ClassBase *cb, struct IClass *cl, Object *o, struct dt
       }
       else
       {
-        error_printf( cb, aid, "not enougth attributes\n" );
+        error_printf( cb, aid, "failed to get %d dt attributes\n", 11);
       }
     }
 
