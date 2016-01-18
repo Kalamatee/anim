@@ -1,11 +1,13 @@
 #   $Id$
 include $(TOP)/config/make.cfg
 
-TESTFILES := chunli.anim7 Mountain.IFF7anim JUMPGATE.IFFanim 3Globes.anim BoingTrek.anim Anti-CBS.anim
-TESTSDIR := $(AROS_TESTS)/datatypes
+TESTSDIR := $(AROS_TESTS)/datatypes/animation/Anim
 
 #MM- workbench-datatype-anim : workbench-datatype-anim-testfiles
+#MM- workbench-datatype-anim-testfiles : workbench-datatype-anim5-testfiles workbench-datatype-anim7-testfiles workbench-datatype-animJ-testfiles
 
-%copy_files_q mmake=workbench-datatype-anim-testfiles files="$(TESTFILES)" dst=$(TESTSDIR)
+%copy_dir_recursive mmake=workbench-datatype-anim5-testfiles src=$(SRCDIR)/$(CURDIR)/ANIM-5 dst=$(TESTSDIR)
+%copy_dir_recursive mmake=workbench-datatype-anim7-testfiles src=$(SRCDIR)/$(CURDIR)/ANIM-7 dst=$(TESTSDIR)
+%copy_dir_recursive mmake=workbench-datatype-animJ-testfiles src=$(SRCDIR)/$(CURDIR)/ANIM-J dst=$(TESTSDIR)
 
 %common
