@@ -4,10 +4,12 @@ include $(TOP)/config/make.cfg
 TESTSDIR := $(AROS_TESTS)/datatypes/animation/Anim
 
 #MM- workbench-datatype-anim : workbench-datatype-anim-testfiles
-#MM- workbench-datatype-anim-testfiles : workbench-datatype-anim5-testfiles workbench-datatype-anim7-testfiles workbench-datatype-animJ-testfiles
+#MM- workbench-datatype-anim-testfiles : workbench-datatype-anim3-testfiles workbench-datatype-anim5-testfiles workbench-datatype-anim7-testfiles workbench-datatype-anim8-testfiles workbench-datatype-animJ-testfiles
 
-%copy_dir_recursive mmake=workbench-datatype-anim5-testfiles src=$(SRCDIR)/$(CURDIR)/ANIM-5 dst=$(TESTSDIR)
-%copy_dir_recursive mmake=workbench-datatype-anim7-testfiles src=$(SRCDIR)/$(CURDIR)/ANIM-7 dst=$(TESTSDIR)
-%copy_dir_recursive mmake=workbench-datatype-animJ-testfiles src=$(SRCDIR)/$(CURDIR)/ANIM-J dst=$(TESTSDIR)
+%copy_dir_recursive mmake=workbench-datatype-anim3-testfiles src=$(SRCDIR)/$(CURDIR)/ANIM-3 dst=$(TESTSDIR)/ANIM-3
+%copy_dir_recursive mmake=workbench-datatype-anim5-testfiles src=$(SRCDIR)/$(CURDIR)/ANIM-5 dst=$(TESTSDIR)/ANIM-5
+%copy_dir_recursive mmake=workbench-datatype-anim7-testfiles src=$(SRCDIR)/$(CURDIR)/ANIM-7 dst=$(TESTSDIR)/ANIM-7
+%copy_dir_recursive mmake=workbench-datatype-anim7-testfiles src=$(SRCDIR)/$(CURDIR)/ANIM-8 dst=$(TESTSDIR)/ANIM-8
+%copy_dir_recursive mmake=workbench-datatype-animJ-testfiles src=$(SRCDIR)/$(CURDIR)/ANIM-J dst=$(TESTSDIR)/ANIM-J
 
 %common
